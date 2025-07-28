@@ -1380,14 +1380,19 @@ class ClaudeRelayService {
       const testBody = {
         model: 'claude-sonnet-4-20250514',
         messages: [{ role: 'user', content: 'Hi' }],
-        stream: false
+        stream: false,
+        // 添加 Claude Code 系统提示词，模拟真实的 Claude Code 请求
+        system: [{
+          type: 'text',
+          text: this.claudeCodeSystemPrompt
+        }]
       };
 
       // 发送测试请求
       try {
-        // 模拟真实的客户端 headers，避免触发 Claude Code 系统提示词
+        // 模拟 Claude Code 的 headers
         const testHeaders = {
-          'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          'user-agent': 'claude-cli/1.0.57 (external, cli)'
         };
         
         const response = await this._makeClaudeRequest(
