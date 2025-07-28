@@ -14,6 +14,7 @@ const config = require('../config/config');
 const redis = require('../src/models/redis');
 const apiKeyService = require('../src/services/apiKeyService');
 const claudeAccountService = require('../src/services/claudeAccountService');
+const sharedPoolService = require('../src/services/sharedPoolService');
 
 const program = new Command();
 
@@ -597,6 +598,542 @@ async function listClaudeAccounts() {
   }
 }
 
+// 🏊 共享池管理
+program
+  .command('pools')
+  .description('共享池管理操作')
+  .action(async () => {
+    await initialize();
+    
+    const { action } = await inquirer.prompt([{
+      type: 'list',
+      name: 'action',
+      message: '请选择操作:',
+      choices: [
+        { name: '📋 查看所有共享池', value: 'list' },
+        { name: '➕ 创建新共享池', value: 'create' },
+        { name: '📝 修改共享池', value: 'update' },
+        { name: '🔗 管理池中的账户', value: 'manage-accounts' },
+        { name: '🔑 管理API Key关联', value: 'manage-keys' },
+        { name: '🗑️  删除共享池', value: 'delete' }
+      ]
+    }]);
+    
+    switch (action) {
+      case 'list':
+        await listSharedPools();
+        break;
+      case 'create':
+        await createSharedPool();
+        break;
+      case 'update':
+        await updateSharedPool();
+        break;
+      case 'manage-accounts':
+        await managePoolAccounts();
+        break;
+      case 'manage-keys':
+        await managePoolApiKeys();
+        break;
+      case 'delete':
+        await deleteSharedPool();
+        break;
+    }
+    
+    await redis.disconnect();
+  });
+
+// 共享池管理函数
+async function listSharedPools() {
+  const spinner = ora('正在获取共享池...').start();
+  
+  try {
+    const pools = await sharedPoolService.getAllPools();
+    spinner.succeed(`找到 ${pools.length} 个共享池`);
+
+    if (pools.length === 0) {
+      console.log(styles.warning('没有找到任何共享池'));
+      return;
+    }
+
+    const tableData = [
+      ['ID', '名称', '描述', '优先级', '账户数', '策略', '状态']
+    ];
+
+    pools.forEach(pool => {
+      tableData.push([
+        pool.id.substring(0, 8) + '...',
+        pool.name,
+        pool.description || '-',
+        pool.priority,
+        pool.accountCount || 0,
+        pool.accountSelectionStrategy || 'least_used',
+        pool.isActive ? '🟢 活跃' : '🔴 停用'
+      ]);
+    });
+
+    console.log('\n🏊 共享池列表:\n');
+    console.log(table(tableData));
+
+  } catch (error) {
+    spinner.fail('获取共享池失败');
+    console.error(styles.error(error.message));
+  }
+}
+
+async function createSharedPool() {
+  try {
+    const answers = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'name',
+        message: '共享池名称:',
+        validate: input => input.trim() !== '' || '名称不能为空'
+      },
+      {
+        type: 'input',
+        name: 'description',
+        message: '描述（可选）:'
+      },
+      {
+        type: 'number',
+        name: 'priority',
+        message: '优先级（数字越大优先级越高）:',
+        default: 100
+      },
+      {
+        type: 'list',
+        name: 'accountSelectionStrategy',
+        message: '账户选择策略:',
+        choices: [
+          { name: '最少使用', value: 'least_used' },
+          { name: '轮询', value: 'round_robin' },
+          { name: '随机', value: 'random' }
+        ],
+        default: 'least_used'
+      }
+    ]);
+
+    const spinner = ora('正在创建共享池...').start();
+    
+    const newPool = await sharedPoolService.createPool(answers);
+    spinner.succeed('共享池创建成功');
+    
+    console.log(styles.success(`\n✅ 共享池 "${newPool.name}" 创建成功`));
+    console.log(`ID: ${newPool.id}`);
+    
+  } catch (error) {
+    console.error(styles.error('创建失败:', error.message));
+  }
+}
+
+async function updateSharedPool() {
+  const spinner = ora('正在获取共享池...').start();
+  
+  try {
+    const pools = await sharedPoolService.getAllPools();
+    spinner.stop();
+    
+    if (pools.length === 0) {
+      console.log(styles.warning('没有找到任何共享池'));
+      return;
+    }
+    
+    const { poolId } = await inquirer.prompt([{
+      type: 'list',
+      name: 'poolId',
+      message: '选择要修改的共享池:',
+      choices: pools.map(pool => ({
+        name: `${pool.name} (优先级: ${pool.priority}, 账户数: ${pool.accountCount})`,
+        value: pool.id
+      }))
+    }]);
+    
+    const selectedPool = pools.find(p => p.id === poolId);
+    
+    const { updateField } = await inquirer.prompt([{
+      type: 'list',
+      name: 'updateField',
+      message: '选择要修改的字段:',
+      choices: [
+        { name: '名称', value: 'name' },
+        { name: '描述', value: 'description' },
+        { name: '优先级', value: 'priority' },
+        { name: '账户选择策略', value: 'accountSelectionStrategy' },
+        { name: '激活状态', value: 'isActive' }
+      ]
+    }]);
+    
+    let updateValue;
+    
+    switch (updateField) {
+      case 'name':
+        const { name } = await inquirer.prompt([{
+          type: 'input',
+          name: 'name',
+          message: '新名称:',
+          default: selectedPool.name,
+          validate: input => input.trim() !== '' || '名称不能为空'
+        }]);
+        updateValue = { name };
+        break;
+        
+      case 'description':
+        const { description } = await inquirer.prompt([{
+          type: 'input',
+          name: 'description',
+          message: '新描述:',
+          default: selectedPool.description
+        }]);
+        updateValue = { description };
+        break;
+        
+      case 'priority':
+        const { priority } = await inquirer.prompt([{
+          type: 'number',
+          name: 'priority',
+          message: '新优先级:',
+          default: selectedPool.priority
+        }]);
+        updateValue = { priority };
+        break;
+        
+      case 'accountSelectionStrategy':
+        const { strategy } = await inquirer.prompt([{
+          type: 'list',
+          name: 'strategy',
+          message: '新的账户选择策略:',
+          choices: [
+            { name: '最少使用', value: 'least_used' },
+            { name: '轮询', value: 'round_robin' },
+            { name: '随机', value: 'random' }
+          ],
+          default: selectedPool.accountSelectionStrategy
+        }]);
+        updateValue = { accountSelectionStrategy: strategy };
+        break;
+        
+      case 'isActive':
+        const { isActive } = await inquirer.prompt([{
+          type: 'confirm',
+          name: 'isActive',
+          message: '是否激活此共享池?',
+          default: selectedPool.isActive
+        }]);
+        updateValue = { isActive };
+        break;
+    }
+    
+    const updateSpinner = ora('正在更新共享池...').start();
+    await sharedPoolService.updatePool(poolId, updateValue);
+    updateSpinner.succeed('共享池更新成功');
+    
+  } catch (error) {
+    console.error(styles.error('更新失败:', error.message));
+  }
+}
+
+async function managePoolAccounts() {
+  const spinner = ora('正在获取共享池...').start();
+  
+  try {
+    const pools = await sharedPoolService.getAllPools();
+    spinner.stop();
+    
+    if (pools.length === 0) {
+      console.log(styles.warning('没有找到任何共享池'));
+      return;
+    }
+    
+    const { poolId } = await inquirer.prompt([{
+      type: 'list',
+      name: 'poolId',
+      message: '选择要管理的共享池:',
+      choices: pools.map(pool => ({
+        name: `${pool.name} (账户数: ${pool.accountCount})`,
+        value: pool.id
+      }))
+    }]);
+    
+    const { action } = await inquirer.prompt([{
+      type: 'list',
+      name: 'action',
+      message: '选择操作:',
+      choices: [
+        { name: '➕ 添加账户到池', value: 'add' },
+        { name: '➖ 从池中移除账户', value: 'remove' },
+        { name: '📋 查看池中的账户', value: 'list' }
+      ]
+    }]);
+    
+    const selectedPool = pools.find(p => p.id === poolId);
+    
+    switch (action) {
+      case 'add':
+        const allAccounts = await claudeAccountService.getAllAccounts();
+        const poolAccountIds = await sharedPoolService.getPoolAccounts(poolId);
+        const availableAccounts = allAccounts.filter(acc => !poolAccountIds.includes(acc.id));
+        
+        if (availableAccounts.length === 0) {
+          console.log(styles.warning('没有可添加的账户'));
+          return;
+        }
+        
+        const { accountIds } = await inquirer.prompt([{
+          type: 'checkbox',
+          name: 'accountIds',
+          message: '选择要添加的账户:',
+          choices: availableAccounts.map(acc => ({
+            name: `${acc.name} (${acc.accountType || 'shared'})`,
+            value: acc.id
+          }))
+        }]);
+        
+        for (const accountId of accountIds) {
+          try {
+            await sharedPoolService.addAccountToPool(poolId, accountId);
+            console.log(styles.success(`✅ 已添加账户 ${accountId}`));
+          } catch (error) {
+            console.error(styles.error(`添加账户 ${accountId} 失败:`, error.message));
+          }
+        }
+        break;
+        
+      case 'remove':
+        const poolAccounts = await sharedPoolService.getPoolAccounts(poolId);
+        if (poolAccounts.length === 0) {
+          console.log(styles.warning('池中没有账户'));
+          return;
+        }
+        
+        const accounts = await claudeAccountService.getAllAccounts();
+        const poolAccountsDetails = accounts.filter(acc => poolAccounts.includes(acc.id));
+        
+        const { removeAccountIds } = await inquirer.prompt([{
+          type: 'checkbox',
+          name: 'removeAccountIds',
+          message: '选择要移除的账户:',
+          choices: poolAccountsDetails.map(acc => ({
+            name: acc.name,
+            value: acc.id
+          }))
+        }]);
+        
+        for (const accountId of removeAccountIds) {
+          try {
+            await sharedPoolService.removeAccountFromPool(poolId, accountId);
+            console.log(styles.success(`✅ 已移除账户 ${accountId}`));
+          } catch (error) {
+            console.error(styles.error(`移除账户 ${accountId} 失败:`, error.message));
+          }
+        }
+        break;
+        
+      case 'list':
+        const listSpinner = ora('正在获取池中的账户...').start();
+        const accountIdsInPool = await sharedPoolService.getPoolAccounts(poolId);
+        const allAccountsList = await claudeAccountService.getAllAccounts();
+        const accountsInPool = allAccountsList.filter(acc => accountIdsInPool.includes(acc.id));
+        listSpinner.stop();
+        
+        if (accountsInPool.length === 0) {
+          console.log(styles.warning('池中没有账户'));
+          return;
+        }
+        
+        console.log(styles.info(`\n共享池 "${selectedPool.name}" 中的账户:\n`));
+        accountsInPool.forEach((acc, index) => {
+          console.log(`${index + 1}. ${acc.name} (${acc.accountType || 'shared'}) - ${acc.isActive ? '激活' : '停用'}`);
+        });
+        break;
+    }
+    
+  } catch (error) {
+    console.error(styles.error('操作失败:', error.message));
+  }
+}
+
+async function managePoolApiKeys() {
+  const spinner = ora('正在获取数据...').start();
+  
+  try {
+    const apiKeys = await apiKeyService.getAllApiKeys();
+    const pools = await sharedPoolService.getAllPools();
+    spinner.stop();
+    
+    if (pools.length === 0) {
+      console.log(styles.warning('没有找到任何共享池'));
+      return;
+    }
+    
+    const { action } = await inquirer.prompt([{
+      type: 'list',
+      name: 'action',
+      message: '选择操作:',
+      choices: [
+        { name: '🔗 将API Key添加到共享池', value: 'add' },
+        { name: '🔓 将API Key从共享池移除', value: 'remove' },
+        { name: '📋 查看API Key的共享池', value: 'list' }
+      ]
+    }]);
+    
+    switch (action) {
+      case 'add':
+        const { keyId } = await inquirer.prompt([{
+          type: 'list',
+          name: 'keyId',
+          message: '选择API Key:',
+          choices: apiKeys.map(key => ({
+            name: `${key.name} (当前池数: ${key.sharedPools ? key.sharedPools.length : 0})`,
+            value: key.id
+          }))
+        }]);
+        
+        const { poolId } = await inquirer.prompt([{
+          type: 'list',
+          name: 'poolId',
+          message: '选择要添加到的共享池:',
+          choices: pools.map(pool => ({
+            name: `${pool.name} (优先级: ${pool.priority})`,
+            value: pool.id
+          }))
+        }]);
+        
+        try {
+          await apiKeyService.addApiKeyToPool(keyId, poolId);
+          console.log(styles.success('✅ API Key已成功添加到共享池'));
+        } catch (error) {
+          console.error(styles.error('添加失败:', error.message));
+        }
+        break;
+        
+      case 'remove':
+        const keysWithPools = apiKeys.filter(key => key.sharedPools && key.sharedPools.length > 0);
+        
+        if (keysWithPools.length === 0) {
+          console.log(styles.warning('没有API Key关联到共享池'));
+          return;
+        }
+        
+        const { removeKeyId } = await inquirer.prompt([{
+          type: 'list',
+          name: 'removeKeyId',
+          message: '选择API Key:',
+          choices: keysWithPools.map(key => ({
+            name: `${key.name} (关联池数: ${key.sharedPools.length})`,
+            value: key.id
+          }))
+        }]);
+        
+        const selectedKey = keysWithPools.find(k => k.id === removeKeyId);
+        
+        const { removePoolId } = await inquirer.prompt([{
+          type: 'list',
+          name: 'removePoolId',
+          message: '选择要移除的共享池:',
+          choices: selectedKey.sharedPools.map(pool => ({
+            name: pool.name,
+            value: pool.id
+          }))
+        }]);
+        
+        try {
+          await apiKeyService.removeApiKeyFromPool(removeKeyId, removePoolId);
+          console.log(styles.success('✅ API Key已从共享池移除'));
+        } catch (error) {
+          console.error(styles.error('移除失败:', error.message));
+        }
+        break;
+        
+      case 'list':
+        const { listKeyId } = await inquirer.prompt([{
+          type: 'list',
+          name: 'listKeyId',
+          message: '选择API Key:',
+          choices: apiKeys.map(key => ({
+            name: key.name,
+            value: key.id
+          }))
+        }]);
+        
+        const keyPools = await apiKeyService.getApiKeyPools(listKeyId);
+        const keyInfo = apiKeys.find(k => k.id === listKeyId);
+        
+        console.log(styles.info(`\nAPI Key "${keyInfo.name}" 关联的共享池:\n`));
+        
+        if (keyPools.length === 0) {
+          console.log(styles.warning('此API Key未关联任何共享池'));
+        } else {
+          keyPools.forEach((pool, index) => {
+            console.log(`${index + 1}. ${pool.name} (优先级: ${pool.priority}, ${pool.isActive ? '激活' : '停用'})`);
+          });
+        }
+        break;
+    }
+    
+  } catch (error) {
+    console.error(styles.error('操作失败:', error.message));
+  }
+}
+
+async function deleteSharedPool() {
+  const spinner = ora('正在获取共享池...').start();
+  
+  try {
+    const pools = await sharedPoolService.getAllPools();
+    spinner.stop();
+    
+    if (pools.length === 0) {
+      console.log(styles.warning('没有找到任何共享池'));
+      return;
+    }
+    
+    const { poolIds } = await inquirer.prompt([{
+      type: 'checkbox',
+      name: 'poolIds',
+      message: '选择要删除的共享池（支持多选）:',
+      choices: pools.map(pool => ({
+        name: `${pool.name} (账户数: ${pool.accountCount})`,
+        value: pool.id
+      }))
+    }]);
+    
+    if (poolIds.length === 0) {
+      console.log(styles.info('未选择任何共享池'));
+      return;
+    }
+    
+    const { confirmed } = await inquirer.prompt([{
+      type: 'confirm',
+      name: 'confirmed',
+      message: `确认要删除 ${poolIds.length} 个共享池吗？此操作不可恢复！`,
+      default: false
+    }]);
+    
+    if (!confirmed) {
+      console.log(styles.info('已取消删除'));
+      return;
+    }
+    
+    const deleteSpinner = ora('正在删除共享池...').start();
+    let successCount = 0;
+    
+    for (const poolId of poolIds) {
+      try {
+        await sharedPoolService.deletePool(poolId);
+        successCount++;
+      } catch (error) {
+        deleteSpinner.fail(`删除失败: ${error.message}`);
+      }
+    }
+    
+    deleteSpinner.succeed(`成功删除 ${successCount}/${poolIds.length} 个共享池`);
+    
+  } catch (error) {
+    console.error(styles.error('删除失败:', error.message));
+  }
+}
+
 // 程序信息
 program
   .name('claude-relay-cli')
@@ -612,6 +1149,7 @@ if (!process.argv.slice(2).length) {
   console.log('使用以下命令管理服务:\n');
   console.log('  claude-relay-cli admin         - 创建初始管理员账户');
   console.log('  claude-relay-cli keys          - API Key 管理（查看/修改过期时间/续期/删除）');
+  console.log('  claude-relay-cli pools         - 共享池管理（创建/修改/管理账户/管理API Key）');
   console.log('  claude-relay-cli status        - 查看系统状态');
   console.log('\n使用 --help 查看详细帮助信息');
 }

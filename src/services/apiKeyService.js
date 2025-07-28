@@ -176,6 +176,7 @@ class ApiKeyService {
   async getAllApiKeys() {
     try {
       const apiKeys = await redis.getAllApiKeys();
+      const sharedPoolService = require('./sharedPoolService');
       
       // 为每个key添加使用统计和当前并发数
       for (const key of apiKeys) {
@@ -201,6 +202,14 @@ class ApiKeyService {
         } catch (e) {
           key.allowedClients = [];
         }
+        
+        // 获取关联的共享池
+        try {
+          key.sharedPools = await sharedPoolService.getApiKeyPools(key.id);
+        } catch (e) {
+          key.sharedPools = [];
+        }
+        
         delete key.apiKey; // 不返回哈希后的key
       }
 
@@ -372,6 +381,60 @@ class ApiKeyService {
     } catch (error) {
       logger.error('❌ Failed to cleanup expired keys:', error);
       return 0;
+    }
+  }
+
+  // 🏊 将API Key加入共享池
+  async addApiKeyToPool(keyId, poolId) {
+    try {
+      const keyData = await redis.getApiKey(keyId);
+      if (!keyData || Object.keys(keyData).length === 0) {
+        throw new Error('API key not found');
+      }
+
+      const sharedPoolService = require('./sharedPoolService');
+      await sharedPoolService.addApiKeyToPool(keyId, poolId);
+      
+      logger.success(`🏊 Added API key ${keyId} to pool ${poolId}`);
+      return { success: true };
+    } catch (error) {
+      logger.error('❌ Failed to add API key to pool:', error);
+      throw error;
+    }
+  }
+
+  // 🔓 将API Key从共享池移除
+  async removeApiKeyFromPool(keyId, poolId) {
+    try {
+      const keyData = await redis.getApiKey(keyId);
+      if (!keyData || Object.keys(keyData).length === 0) {
+        throw new Error('API key not found');
+      }
+
+      const sharedPoolService = require('./sharedPoolService');
+      await sharedPoolService.removeApiKeyFromPool(keyId, poolId);
+      
+      logger.success(`🔓 Removed API key ${keyId} from pool ${poolId}`);
+      return { success: true };
+    } catch (error) {
+      logger.error('❌ Failed to remove API key from pool:', error);
+      throw error;
+    }
+  }
+
+  // 📋 获取API Key关联的所有共享池
+  async getApiKeyPools(keyId) {
+    try {
+      const keyData = await redis.getApiKey(keyId);
+      if (!keyData || Object.keys(keyData).length === 0) {
+        throw new Error('API key not found');
+      }
+
+      const sharedPoolService = require('./sharedPoolService');
+      return await sharedPoolService.getApiKeyPools(keyId);
+    } catch (error) {
+      logger.error('❌ Failed to get pools for API key:', error);
+      throw error;
     }
   }
 }

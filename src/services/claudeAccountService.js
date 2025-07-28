@@ -466,7 +466,7 @@ class ClaudeAccountService {
     }
   }
 
-  // 🎯 基于API Key选择账户（支持专属绑定和共享池）
+  // 🎯 基于API Key选择账户（支持专属绑定和多共享池）
   async selectAccountForApiKey(apiKeyData, sessionHash = null, excludeAccountIds = null) {
     try {
       // 如果API Key绑定了专属账户，优先使用
@@ -477,11 +477,34 @@ class ClaudeAccountService {
           return apiKeyData.claudeAccountId;
         } else {
           const status = boundAccount ? boundAccount.status : 'not found';
-          logger.warn(`⚠️ Bound account ${apiKeyData.claudeAccountId} is not available (status: ${status}), falling back to shared pool`);
+          logger.warn(`⚠️ Bound account ${apiKeyData.claudeAccountId} is not available (status: ${status}), falling back to shared pools`);
         }
       }
 
-      // 如果没有绑定账户或绑定账户不可用，从共享池选择
+      // 尝试从多共享池中选择账户
+      const sharedPoolService = require('./sharedPoolService');
+      try {
+        const poolResult = await sharedPoolService.selectAccountFromPools(
+          apiKeyData.id,
+          sessionHash,
+          excludeAccountIds
+        );
+        
+        if (poolResult && poolResult.accountId) {
+          logger.info(`🎯 Selected account ${poolResult.accountId} from pool "${poolResult.poolName}" for API key ${apiKeyData.name}`);
+          
+          // 如果有会话哈希，建立映射
+          if (sessionHash) {
+            await redis.setSessionAccountMapping(sessionHash, poolResult.accountId, 3600); // 1小时过期
+          }
+          
+          return poolResult.accountId;
+        }
+      } catch (poolError) {
+        logger.warn(`⚠️ Failed to select from shared pools: ${poolError.message}, falling back to legacy shared pool`);
+      }
+
+      // 如果多共享池选择失败，回退到旧的共享池逻辑（向后兼容）
       const accounts = await redis.getAllClaudeAccounts();
       
       let sharedAccounts = accounts.filter(account => 
