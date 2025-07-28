@@ -222,7 +222,7 @@ class ClaudeRelayService {
               // 检查是否是OAuth token被撤销的错误
               else if (errorMessage.includes('oauth token revoked') || 
                        errorMessage.includes('please run /login') ||
-                       errorMessage.includes('authentication_error')) {
+                       (errorMessage.includes('authentication_error') && !errorMessage.includes('OAuth authentication is currently not supported'))) {
                 isTokenRevoked = true;
               }
               // 检查是否是组织被禁用
@@ -987,7 +987,7 @@ class ClaudeRelayService {
                   // 检查是否是OAuth token被撤销的错误
                   else if (errorMessage.includes('oauth token revoked') || 
                            errorMessage.includes('please run /login') ||
-                           errorMessage.includes('authentication_error')) {
+                           (errorMessage.includes('authentication_error') && !errorMessage.includes('OAuth authentication is currently not supported'))) {
                     logger.warn(`🔐 OAuth token revoked detected in stream for account ${accountId}`);
                     // 标记账号为不活跃
                     claudeAccountService.markAccountOAuthRevoked(accountId, 'OAuth token revoked in stream').catch(err => {
@@ -1378,19 +1378,23 @@ class ClaudeRelayService {
       
       // 构建一个最小的测试请求
       const testBody = {
-        model: 'claude-3-haiku-20240307',
+        model: 'claude-sonnet-4-20250514',
         messages: [{ role: 'user', content: 'Hi' }],
-        max_tokens: 1,
         stream: false
       };
 
       // 发送测试请求
       try {
+        // 模拟真实的客户端 headers，避免触发 Claude Code 系统提示词
+        const testHeaders = {
+          'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        };
+        
         const response = await this._makeClaudeRequest(
           testBody, 
           accessToken, 
           proxyAgent,
-          {}, // 空的客户端headers
+          testHeaders, // 使用模拟的headers
           accountId,
           null, // 不需要请求回调
           { betaHeader: '' } // 不使用beta header
@@ -1406,6 +1410,7 @@ class ClaudeRelayService {
           // 解析错误信息
           let errorMessage = `HTTP ${response.statusCode}`;
           let isOrganizationDisabled = false;
+          let isOAuthNotSupported = false;
           
           try {
             const responseBody = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
@@ -1417,6 +1422,11 @@ class ClaudeRelayService {
                   errorMessage.includes('This organization has been disabled')) {
                 isOrganizationDisabled = true;
                 errorMessage = '账号已被封禁 (Organization disabled)';
+              }
+              // 检查是否是OAuth不支持的错误
+              else if (errorMessage.includes('OAuth authentication is currently not supported')) {
+                isOAuthNotSupported = true;
+                errorMessage = '该账户不支持OAuth认证';
               }
             }
           } catch (e) {
@@ -1437,7 +1447,8 @@ class ClaudeRelayService {
             success: false,
             error: errorMessage,
             statusCode: response.statusCode,
-            isBanned: isOrganizationDisabled
+            isBanned: isOrganizationDisabled,
+            isOAuthNotSupported: isOAuthNotSupported
           };
         }
       } catch (requestError) {
