@@ -9,6 +9,8 @@ const sessionHelper = require('../utils/sessionHelper');
 const logger = require('../utils/logger');
 const config = require('../../config/config');
 const claudeCodeHeadersService = require('./claudeCodeHeadersService');
+const circuitBreakerService = require('./circuitBreakerService');
+const accountRecoveryService = require('./accountRecoveryService');
 
 class ClaudeRelayService {
   constructor() {
@@ -113,6 +115,29 @@ class ClaudeRelayService {
         // 记录已使用的账户
         usedAccountIds.add(accountId);
         
+        // 检查熔断器状态
+        const circuitCheck = await circuitBreakerService.canRequest(accountId);
+        if (!circuitCheck.allowed) {
+          logger.warn(`🚫 Circuit breaker OPEN for account ${accountId}, state: ${circuitCheck.state}`);
+          
+          // 如果是第一次尝试或还有其他账户可用，尝试其他账户
+          if (retryCount < maxRetries - 1) {
+            continue;
+          }
+          
+          // 没有可用账户了
+          return {
+            statusCode: 503,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              error: {
+                type: 'service_unavailable',
+                message: 'Service temporarily unavailable. Please try again later.'
+              }
+            })
+          };
+        }
+        
         logger.info(`📤 Processing API request for key: ${apiKeyData.name || apiKeyData.id}, account: ${accountId}${sessionHash ? `, session: ${sessionHash}` : ''}${retryCount > 0 ? `, retry: ${retryCount}` : ''}`);
         
         // 获取有效的访问token
@@ -164,6 +189,9 @@ class ClaudeRelayService {
           // 429状态码，需要重试
           logger.warn(`🚫 Rate limit (429) detected for account ${accountId}`);
           await claudeAccountService.markAccountRateLimited(accountId, sessionHash);
+          // 记录失败到熔断器和恢复服务
+          await circuitBreakerService.recordFailure(accountId, 'HTTP 429 Rate limit');
+          await accountRecoveryService.recordAccountFailure(accountId, new Error('HTTP 429 Rate limit'));
           lastResponse = response;
           
           // 如果还有重试次数，继续下一次重试
@@ -213,6 +241,9 @@ class ClaudeRelayService {
             logger.warn(`🔐 OAuth token revoked for account ${accountId}`);
             // 标记账号为不活跃
             await claudeAccountService.markAccountInactive(accountId, 'OAuth token revoked');
+            // 记录失败到熔断器和恢复服务
+            await circuitBreakerService.recordFailure(accountId, 'OAuth token revoked');
+            await accountRecoveryService.recordAccountFailure(accountId, new Error('OAuth token revoked'));
             lastResponse = response;
             
             // 如果还有重试次数，切换账号继续重试
@@ -224,6 +255,9 @@ class ClaudeRelayService {
             logger.warn(`🚫 Rate limit detected for account ${accountId}, status: ${response.statusCode}`);
             // 标记账号为限流状态并删除粘性会话映射
             await claudeAccountService.markAccountRateLimited(accountId, sessionHash);
+            // 记录失败到熔断器和恢复服务
+            await circuitBreakerService.recordFailure(accountId, 'Rate limit exceeded');
+            await accountRecoveryService.recordAccountFailure(accountId, new Error('Rate limit exceeded'));
             lastResponse = response;
             
             // 如果还有重试次数，继续下一次重试
@@ -242,6 +276,10 @@ class ClaudeRelayService {
             await claudeAccountService.removeAccountRateLimit(accountId);
           }
           
+          // 记录成功到熔断器和恢复服务
+          await circuitBreakerService.recordSuccess(accountId);
+          await accountRecoveryService.recordAccountSuccess(accountId);
+          
           // 只有真实的 Claude Code 请求才更新 headers
           if (clientHeaders && Object.keys(clientHeaders).length > 0 && this.isRealClaudeCodeRequest(requestBody, clientHeaders)) {
             await claudeCodeHeadersService.storeAccountHeaders(accountId, clientHeaders);
@@ -255,6 +293,10 @@ class ClaudeRelayService {
           
           logger.info(`✅ API request completed - Key: ${apiKeyData.name}, Account: ${accountId}, Model: ${requestBody.model}, Input: ~${Math.round(inputTokens)} tokens, Output: ~${Math.round(outputTokens)} tokens`);
           
+          // 记录成功到熔断器和恢复服务
+          await circuitBreakerService.recordSuccess(accountId);
+          await accountRecoveryService.recordAccountSuccess(accountId);
+          
           // 在响应中添加accountId，以便调用方记录账户级别统计
           response.accountId = accountId;
           return response;
@@ -267,6 +309,12 @@ class ClaudeRelayService {
       } catch (error) {
         logger.error(`❌ Claude relay request failed for key: ${apiKeyData.name || apiKeyData.id}, retry: ${retryCount}:`, error.message);
         lastError = error;
+        
+        // 记录失败到熔断器和恢复服务（如果有accountId）
+        if (accountId) {
+          await circuitBreakerService.recordFailure(accountId, error.message);
+          await accountRecoveryService.recordAccountFailure(accountId, error);
+        }
         
         // 如果还有重试次数，继续下一次重试
         if (retryCount < maxRetries - 1) {
@@ -709,6 +757,24 @@ class ClaudeRelayService {
       // 选择可用的Claude账户（支持专属绑定和sticky会话）
       const accountId = await claudeAccountService.selectAccountForApiKey(apiKeyData, sessionHash);
       
+      // 检查熔断器状态
+      const circuitCheck = await circuitBreakerService.canRequest(accountId);
+      if (!circuitCheck.allowed) {
+        logger.warn(`🚫 [Stream] Circuit breaker OPEN for account ${accountId}, state: ${circuitCheck.state}`);
+        
+        // 对于流式响应，需要写入错误并结束流
+        const errorResponse = JSON.stringify({
+          error: {
+            type: 'service_unavailable',
+            message: 'Service temporarily unavailable. Please try again later.'
+          }
+        });
+        
+        responseStream.writeHead(503, { 'Content-Type': 'application/json' });
+        responseStream.end(errorResponse);
+        return;
+      }
+      
       logger.info(`📡 Processing streaming API request with usage capture for key: ${apiKeyData.name || apiKeyData.id}, account: ${accountId}${sessionHash ? `, session: ${sessionHash}` : ''}`);
       
       // 获取有效的访问token
@@ -790,6 +856,10 @@ class ClaudeRelayService {
         // 错误响应处理
         if (res.statusCode !== 200) {
           logger.error(`❌ Claude API returned error status: ${res.statusCode}`);
+          // 记录失败到熔断器和恢复服务
+          circuitBreakerService.recordFailure(accountId, `HTTP ${res.statusCode}`).catch(() => {});
+          accountRecoveryService.recordAccountFailure(accountId, new Error(`HTTP ${res.statusCode}`)).catch(() => {});
+          
           let errorData = '';
           
           res.on('data', (chunk) => {
@@ -894,6 +964,9 @@ class ClaudeRelayService {
                     claudeAccountService.markAccountInactive(accountId, 'OAuth token revoked in stream').catch(err => {
                       logger.error(`❌ Failed to mark account as inactive: ${err.message}`);
                     });
+                    // 记录失败到熔断器和恢复服务
+                    circuitBreakerService.recordFailure(accountId, 'OAuth token revoked').catch(() => {});
+                    accountRecoveryService.recordAccountFailure(accountId, new Error('OAuth token revoked')).catch(() => {});
                   }
                 }
                 
@@ -948,12 +1021,19 @@ class ClaudeRelayService {
           if (rateLimitDetected || res.statusCode === 429) {
             // 标记账号为限流状态并删除粘性会话映射
             await claudeAccountService.markAccountRateLimited(accountId, sessionHash);
+            // 记录失败到熔断器和恢复服务
+            await circuitBreakerService.recordFailure(accountId, 'Rate limit in stream');
+            await accountRecoveryService.recordAccountFailure(accountId, new Error('Rate limit in stream'));
           } else if (res.statusCode === 200) {
             // 如果请求成功，检查并移除限流状态
             const isRateLimited = await claudeAccountService.isAccountRateLimited(accountId);
             if (isRateLimited) {
               await claudeAccountService.removeAccountRateLimit(accountId);
             }
+            
+            // 记录成功到熔断器和恢复服务
+            await circuitBreakerService.recordSuccess(accountId);
+            await accountRecoveryService.recordAccountSuccess(accountId);
             
             // 只有真实的 Claude Code 请求才更新 headers（流式请求）
             if (clientHeaders && Object.keys(clientHeaders).length > 0 && this.isRealClaudeCodeRequest(body, clientHeaders)) {
@@ -972,6 +1052,10 @@ class ClaudeRelayService {
           errno: error.errno,
           syscall: error.syscall
         });
+        
+        // 记录失败到熔断器和恢复服务
+        circuitBreakerService.recordFailure(accountId, error.message).catch(() => {});
+        accountRecoveryService.recordAccountFailure(accountId, error).catch(() => {});
         
         // 根据错误类型提供更具体的错误信息
         let errorMessage = 'Upstream request failed';
@@ -1014,6 +1098,10 @@ class ClaudeRelayService {
       req.on('timeout', () => {
         req.destroy();
         logger.error('❌ Claude stream request timeout');
+        
+        // 记录失败到熔断器和恢复服务
+        circuitBreakerService.recordFailure(accountId, 'Request timeout').catch(() => {});
+        accountRecoveryService.recordAccountFailure(accountId, new Error('Request timeout')).catch(() => {});
         if (!responseStream.headersSent) {
           responseStream.writeHead(504, { 
             'Content-Type': 'text/event-stream',
@@ -1146,6 +1234,10 @@ class ClaudeRelayService {
       req.on('timeout', () => {
         req.destroy();
         logger.error('❌ Claude stream request timeout');
+        
+        // 记录失败到熔断器和恢复服务
+        circuitBreakerService.recordFailure(accountId, 'Request timeout').catch(() => {});
+        accountRecoveryService.recordAccountFailure(accountId, new Error('Request timeout')).catch(() => {});
         if (!responseStream.headersSent) {
           responseStream.writeHead(504, { 
             'Content-Type': 'text/event-stream',

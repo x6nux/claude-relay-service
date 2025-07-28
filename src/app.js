@@ -71,6 +71,29 @@ class Application {
         logger.info('🏥 Account health check service is disabled');
       }
       
+      // 🔧 启动账户恢复服务
+      if (config.accountRecovery?.enabled !== false) {
+        logger.info('🔧 Starting account recovery service...');
+        const accountRecoveryService = require('./services/accountRecoveryService');
+        accountRecoveryService.start();
+        logger.success('✅ Account recovery service started');
+        
+        // 注册熔断器事件监听器
+        const circuitBreakerService = require('./services/circuitBreakerService');
+        circuitBreakerService.on('stateChange', (event) => {
+          logger.info(`🔄 Circuit breaker state changed for account ${event.accountId}: ${event.oldState} -> ${event.newState}`);
+        });
+        
+        // 定期清理过期的熔断器数据
+        setInterval(() => {
+          circuitBreakerService.cleanup().catch(error => {
+            logger.error('Failed to cleanup circuit breaker data:', error);
+          });
+        }, 3600000); // 每小时清理一次
+      } else {
+        logger.info('🔧 Account recovery service is disabled');
+      }
+      
       // 🛡️ 安全中间件
       this.app.use(helmet({
         contentSecurityPolicy: false, // 允许内联样式和脚本

@@ -17,6 +17,10 @@ const config = require('../../config/config');
 
 const router = express.Router();
 
+// 引入熔断器管理路由
+const circuitBreakerRoutes = require('./adminCircuitBreaker');
+router.use('/', circuitBreakerRoutes);
+
 // 🔑 API Keys 管理
 
 // 调试：获取API Key费用详情
