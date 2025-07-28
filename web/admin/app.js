@@ -25,6 +25,7 @@ const app = createApp({
                 { key: 'dashboard', name: '仪表板', icon: 'fas fa-tachometer-alt' },
                 { key: 'apiKeys', name: 'API Keys', icon: 'fas fa-key' },
                 { key: 'accounts', name: '账户管理', icon: 'fas fa-user-circle' },
+                { key: 'sharedPools', name: '共享池', icon: 'fas fa-swimming-pool' },
                 { key: 'tutorial', name: '使用教程', icon: 'fas fa-graduation-cap' },
                 { key: 'settings', name: '其他设置', icon: 'fas fa-cogs' }
             ],
@@ -310,7 +311,58 @@ const app = createApp({
                 updatedAt: null
             },
             oemSettingsLoading: false,
-            oemSettingsSaving: false
+            oemSettingsSaving: false,
+            
+            // 共享池相关
+            sharedPools: [],
+            sharedPoolsLoading: false,
+            showCreatePoolModal: false,
+            createPoolLoading: false,
+            poolForm: {
+                name: '',
+                description: '',
+                priority: 100,
+                accountSelectionStrategy: 'least_used',
+                isActive: true
+            },
+            showEditPoolModal: false,
+            editPoolLoading: false,
+            editPoolForm: {
+                id: '',
+                name: '',
+                description: '',
+                priority: 100,
+                accountSelectionStrategy: 'least_used',
+                isActive: true
+            },
+            // 池账户管理
+            showPoolAccountsModal: false,
+            poolAccountsLoading: false,
+            currentPoolAccounts: {
+                poolId: '',
+                poolName: '',
+                accounts: [],
+                availableAccounts: []
+            },
+            // API Key池管理
+            showApiKeyPoolsModal: false,
+            apiKeyPoolsLoading: false,
+            
+            // 新增：共享池管理模态框相关
+            showManagePoolAccountsModal: false,
+            currentManagePool: null,
+            managePoolTab: 'current',
+            poolAccounts: [],
+            availablePoolAccounts: [],
+            addAccountToPoolLoading: {},
+            removeAccountFromPoolLoading: {},
+            updatePoolLoading: false,
+            currentApiKeyPools: {
+                apiKeyId: '',
+                apiKeyName: '',
+                pools: [],
+                availablePools: []
+            }
         }
     },
     
@@ -415,9 +467,6 @@ const app = createApp({
     mounted() {
         console.log('Vue app mounted, authToken:', !!this.authToken, 'activeTab:', this.activeTab);
         
-        // 从URL参数中读取tab信息
-        this.initializeTabFromUrl();
-        
         // 初始化防抖函数
         this.setTrendPeriod = this.debounce(this._setTrendPeriod, 300);
         
@@ -431,13 +480,16 @@ const app = createApp({
             }
         });
         
-        // 监听浏览器前进后退按钮事件
-        window.addEventListener('popstate', () => {
-            this.initializeTabFromUrl();
-        });
-        
         if (this.authToken) {
             this.isLoggedIn = true;
+            
+            // 已登录，从URL参数中读取tab信息
+            this.initializeTabFromUrl();
+            
+            // 监听浏览器前进后退按钮事件
+            window.addEventListener('popstate', () => {
+                this.initializeTabFromUrl();
+            });
             
             // 加载当前用户信息
             this.loadCurrentUser();
@@ -468,6 +520,14 @@ const app = createApp({
             }
         } else {
             console.log('No auth token found, user needs to login');
+            
+            // 未登录时，确保activeTab是dashboard，并清除URL中的tab参数
+            this.activeTab = 'dashboard';
+            const url = new URL(window.location.href);
+            if (url.searchParams.has('tab')) {
+                url.searchParams.delete('tab');
+                window.history.replaceState({}, '', url.toString());
+            }
         }
         
         // 始终加载OEM设置，无论登录状态
@@ -4176,6 +4236,308 @@ const app = createApp({
         handleIconError(event) {
             console.error('Icon load error');
             event.target.style.display = 'none';
+        },
+        
+        // 加载当前标签页数据
+        async loadCurrentTabData() {
+            switch (this.activeTab) {
+                case 'dashboard':
+                    await this.loadDashboard();
+                    break;
+                case 'apiKeys':
+                    await this.loadApiKeys();
+                    break;
+                case 'accounts':
+                    await this.loadAccounts();
+                    break;
+                case 'sharedPools':
+                    await this.loadSharedPools();
+                    break;
+                case 'settings':
+                    await this.loadOemSettings();
+                    break;
+            }
+        },
+
+        // ==================== 共享池管理方法 ====================
+        
+        // 加载共享池列表
+        async loadSharedPools() {
+            this.sharedPoolsLoading = true;
+            try {
+                const response = await fetch('/admin/shared-pools', {
+                    headers: {
+                        'Authorization': `Bearer ${this.authToken}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                this.sharedPools = data || [];
+            } catch (error) {
+                console.error('加载共享池失败:', error);
+                this.showToast('加载共享池失败', 'error');
+            } finally {
+                this.sharedPoolsLoading = false;
+            }
+        },
+        
+        // 打开创建共享池模态框
+        openCreatePoolModal() {
+            this.poolForm = {
+                name: '',
+                description: '',
+                priority: 100,
+                accountSelectionStrategy: 'least_used',
+                isActive: true
+            };
+            this.showCreatePoolModal = true;
+        },
+        
+        // 关闭创建共享池模态框
+        closeCreatePoolModal() {
+            this.showCreatePoolModal = false;
+            this.poolForm = {
+                name: '',
+                description: '',
+                priority: 100,
+                accountSelectionStrategy: 'least_used',
+                isActive: true
+            };
+        },
+        
+        // 创建共享池
+        async createPool() {
+            if (!this.poolForm.name.trim()) {
+                this.showToast('请输入共享池名称', 'warning');
+                return;
+            }
+            
+            this.createPoolLoading = true;
+            try {
+                const response = await fetch('/admin/shared-pools', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.authToken}`
+                    },
+                    body: JSON.stringify(this.poolForm)
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || '创建失败');
+                }
+                
+                const newPool = await response.json();
+                this.showToast('共享池创建成功', 'success');
+                this.closeCreatePoolModal();
+                await this.loadSharedPools();
+            } catch (error) {
+                console.error('创建共享池失败:', error);
+                this.showToast(error.message || '创建共享池失败', 'error');
+            } finally {
+                this.createPoolLoading = false;
+            }
+        },
+        
+        // 打开编辑共享池模态框
+        openEditPoolModal(pool) {
+            this.editPoolForm = {
+                id: pool.id,
+                name: pool.name,
+                description: pool.description || '',
+                priority: pool.priority || 100,
+                accountSelectionStrategy: pool.accountSelectionStrategy || 'least_used',
+                isActive: pool.isActive !== false
+            };
+            this.showEditPoolModal = true;
+        },
+        
+        // 关闭编辑共享池模态框
+        closeEditPoolModal() {
+            this.showEditPoolModal = false;
+            this.editPoolForm = {
+                id: '',
+                name: '',
+                description: '',
+                priority: 100,
+                accountSelectionStrategy: 'least_used',
+                isActive: true
+            };
+        },
+        
+        // 更新共享池
+        async updatePool() {
+            if (!this.editPoolForm.name.trim()) {
+                this.showToast('请输入共享池名称', 'warning');
+                return;
+            }
+            
+            this.updatePoolLoading = true;
+            try {
+                const { id, ...updateData } = this.editPoolForm;
+                const response = await fetch(`/admin/shared-pools/${id}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.authToken}`
+                    },
+                    body: JSON.stringify(updateData)
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || '更新失败');
+                }
+                
+                this.showToast('共享池更新成功', 'success');
+                this.closeEditPoolModal();
+                await this.loadSharedPools();
+            } catch (error) {
+                console.error('更新共享池失败:', error);
+                this.showToast(error.message || '更新共享池失败', 'error');
+            } finally {
+                this.updatePoolLoading = false;
+            }
+        },
+        
+        // 删除共享池
+        async deletePool(pool) {
+            await this.showConfirm(
+                '删除共享池',
+                `确定要删除共享池 "${pool.name}" 吗？\n此操作不可恢复。`,
+                async () => {
+                    try {
+                        const response = await fetch(`/admin/shared-pools/${pool.id}`, {
+                            method: 'DELETE',
+                            headers: {
+                                'Authorization': `Bearer ${this.authToken}`
+                            }
+                        });
+                        
+                        if (!response.ok) {
+                            const error = await response.json();
+                            throw new Error(error.message || '删除失败');
+                        }
+                        
+                        this.showToast('共享池删除成功', 'success');
+                        await this.loadSharedPools();
+                    } catch (error) {
+                        console.error('删除共享池失败:', error);
+                        this.showToast(error.message || '删除共享池失败', 'error');
+                    }
+                }
+            );
+        },
+        
+        // 管理共享池账户
+        async managePoolAccounts(pool) {
+            this.currentManagePool = pool;
+            this.managePoolTab = 'current';
+            this.showManagePoolAccountsModal = true;
+            
+            // 加载池中的账户
+            await this.loadPoolAccounts(pool.id);
+            // 加载所有账户
+            await this.loadAccounts();
+        },
+        
+        // 关闭管理账户模态框
+        closeManagePoolAccountsModal() {
+            this.showManagePoolAccountsModal = false;
+            this.currentManagePool = null;
+            this.poolAccounts = [];
+            this.availablePoolAccounts = [];
+        },
+        
+        // 加载池中的账户
+        async loadPoolAccounts(poolId) {
+            try {
+                const response = await fetch(`/admin/shared-pools/${poolId}/accounts`, {
+                    headers: {
+                        'Authorization': `Bearer ${this.authToken}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const accountIds = await response.json();
+                
+                // 从所有账户中筛选出池中的账户
+                this.poolAccounts = this.accounts.filter(acc => accountIds.includes(acc.id));
+                
+                // 计算可用账户（不在池中的账户）
+                this.availablePoolAccounts = this.accounts.filter(acc => !accountIds.includes(acc.id));
+            } catch (error) {
+                console.error('加载池账户失败:', error);
+                this.showToast('加载池账户失败', 'error');
+            }
+        },
+        
+        // 添加账户到池
+        async addAccountToPool(accountId) {
+            if (!this.currentManagePool) return;
+            
+            this.$set(this.addAccountToPoolLoading, accountId, true);
+            try {
+                const response = await fetch(`/admin/shared-pools/${this.currentManagePool.id}/accounts`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.authToken}`
+                    },
+                    body: JSON.stringify({ accountId })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || '添加失败');
+                }
+                
+                this.showToast('账户添加成功', 'success');
+                await this.loadPoolAccounts(this.currentManagePool.id);
+                await this.loadSharedPools(); // 刷新账户数量
+            } catch (error) {
+                console.error('添加账户失败:', error);
+                this.showToast(error.message || '添加账户失败', 'error');
+            } finally {
+                this.$delete(this.addAccountToPoolLoading, accountId);
+            }
+        },
+        
+        // 从池中移除账户
+        async removeAccountFromPool(accountId) {
+            if (!this.currentManagePool) return;
+            
+            this.$set(this.removeAccountFromPoolLoading, accountId, true);
+            try {
+                const response = await fetch(`/admin/shared-pools/${this.currentManagePool.id}/accounts/${accountId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${this.authToken}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || '移除失败');
+                }
+                
+                this.showToast('账户移除成功', 'success');
+                await this.loadPoolAccounts(this.currentManagePool.id);
+                await this.loadSharedPools(); // 刷新账户数量
+            } catch (error) {
+                console.error('移除账户失败:', error);
+                this.showToast(error.message || '移除账户失败', 'error');
+            } finally {
+                this.$delete(this.removeAccountFromPoolLoading, accountId);
+            }
         }
     }
 });

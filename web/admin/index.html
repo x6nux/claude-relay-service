@@ -1267,6 +1267,94 @@
                         </div>
                     </div>
                 </div>
+                
+                <!-- 共享池管理 -->
+                <div v-if="activeTab === 'sharedPools'" class="tab-content">
+                    <div class="card p-8">
+                        <div class="flex items-center justify-between mb-8">
+                            <h3 class="text-2xl font-bold text-gray-900 flex items-center">
+                                <i class="fas fa-swimming-pool text-blue-600 mr-3"></i>
+                                共享池管理
+                            </h3>
+                            <button @click="openCreatePoolModal" class="btn btn-primary">
+                                <i class="fas fa-plus mr-2"></i>创建共享池
+                            </button>
+                        </div>
+                        
+                        <!-- 共享池列表 -->
+                        <div v-if="sharedPoolsLoading" class="text-center py-12">
+                            <div class="loading-spinner mx-auto mb-4"></div>
+                            <p class="text-gray-600">加载中...</p>
+                        </div>
+                        
+                        <div v-else-if="sharedPools.length === 0" class="text-center py-12 bg-gray-50 rounded-xl">
+                            <i class="fas fa-swimming-pool text-6xl text-gray-300 mb-4"></i>
+                            <p class="text-gray-600 text-lg mb-4">还没有创建任何共享池</p>
+                            <button @click="openCreatePoolModal" class="btn btn-primary">
+                                <i class="fas fa-plus mr-2"></i>创建第一个共享池
+                            </button>
+                        </div>
+                        
+                        <div v-else class="grid gap-6">
+                            <div v-for="pool in sharedPools" :key="pool.id" 
+                                 class="bg-white rounded-xl border border-gray-200 p-6 hover:shadow-lg transition-shadow">
+                                <div class="flex items-start justify-between mb-4">
+                                    <div>
+                                        <h4 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                                            {{ pool.name }}
+                                            <span v-if="!pool.isActive" class="text-xs px-2 py-1 bg-red-100 text-red-600 rounded-full">
+                                                已停用
+                                            </span>
+                                        </h4>
+                                        <p v-if="pool.description" class="text-gray-600 mt-1">{{ pool.description }}</p>
+                                    </div>
+                                    <div class="flex gap-2">
+                                        <button @click="managePoolAccounts(pool)" 
+                                                class="text-blue-600 hover:text-blue-700 transition-colors"
+                                                title="管理账户">
+                                            <i class="fas fa-users"></i>
+                                        </button>
+                                        <button @click="openEditPoolModal(pool)" 
+                                                class="text-gray-600 hover:text-gray-700 transition-colors"
+                                                title="编辑">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <button @click="deletePool(pool)" 
+                                                class="text-red-600 hover:text-red-700 transition-colors"
+                                                title="删除">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                    <div>
+                                        <span class="text-gray-500">优先级：</span>
+                                        <span class="font-semibold">{{ pool.priority }}</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-gray-500">账户数：</span>
+                                        <span class="font-semibold">{{ pool.accountCount || 0 }}</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-gray-500">选择策略：</span>
+                                        <span class="font-semibold">
+                                            {{ pool.accountSelectionStrategy === 'least_used' ? '最少使用' :
+                                               pool.accountSelectionStrategy === 'round_robin' ? '轮询' : '随机' }}
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <span class="text-gray-500">状态：</span>
+                                        <span :class="pool.isActive ? 'text-green-600' : 'text-red-600'" class="font-semibold">
+                                            {{ pool.isActive ? '激活' : '停用' }}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
                 <div v-if="activeTab === 'tutorial'" class="tab-content">
                     <div class="card p-6">
                         <div class="mb-8">
@@ -3879,6 +3967,317 @@
                         <div v-if="editAccountLoading" class="loading-spinner mr-2"></div>
                         <i v-else class="fas fa-check mr-2"></i>
                         {{ editAccountLoading ? '更新中...' : '更新账户' }}
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 创建共享池模态框 -->
+        <div v-if="showCreatePoolModal" class="fixed inset-0 modal z-50 flex items-center justify-center p-4">
+            <div class="modal-content w-full max-w-md p-8 mx-auto max-h-[90vh] flex flex-col">
+                <div class="flex items-center justify-between mb-6">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center">
+                            <i class="fas fa-swimming-pool text-white"></i>
+                        </div>
+                        <h3 class="text-xl font-bold text-gray-900">创建共享池</h3>
+                    </div>
+                    <button 
+                        @click="closeCreatePoolModal"
+                        class="text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+                
+                <form @submit.prevent="createPool" class="space-y-6 modal-scroll-content custom-scrollbar flex-1">
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-3">名称</label>
+                        <input 
+                            v-model="poolForm.name" 
+                            type="text" 
+                            required 
+                            class="form-input w-full"
+                            placeholder="为共享池取一个名称"
+                        >
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-3">描述（可选）</label>
+                        <textarea 
+                            v-model="poolForm.description" 
+                            class="form-input w-full"
+                            rows="3"
+                            placeholder="描述这个共享池的用途"
+                        ></textarea>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-3">优先级</label>
+                        <input 
+                            v-model.number="poolForm.priority" 
+                            type="number" 
+                            required 
+                            class="form-input w-full"
+                            placeholder="数字越大优先级越高"
+                            min="0"
+                            max="999"
+                        >
+                        <p class="text-xs text-gray-500 mt-1">API Key将优先使用高优先级的共享池</p>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-3">账户选择策略</label>
+                        <select v-model="poolForm.accountSelectionStrategy" class="form-input w-full">
+                            <option value="least_used">最少使用</option>
+                            <option value="round_robin">轮询</option>
+                            <option value="random">随机</option>
+                        </select>
+                        <p class="text-xs text-gray-500 mt-1">
+                            <span v-if="poolForm.accountSelectionStrategy === 'least_used'">选择使用次数最少的账户</span>
+                            <span v-else-if="poolForm.accountSelectionStrategy === 'round_robin'">按顺序轮流使用账户</span>
+                            <span v-else>随机选择一个账户</span>
+                        </p>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-3">激活状态</label>
+                        <div class="flex items-center gap-3">
+                            <label class="flex items-center">
+                                <input 
+                                    v-model="poolForm.isActive" 
+                                    type="checkbox"
+                                    class="form-checkbox"
+                                >
+                                <span class="ml-2 text-sm text-gray-700">立即激活此共享池</span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="flex gap-3 pt-4">
+                        <button 
+                            type="button" 
+                            @click="closeCreatePoolModal" 
+                            class="flex-1 px-6 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition-colors"
+                        >
+                            取消
+                        </button>
+                        <button 
+                            type="submit" 
+                            :disabled="createPoolLoading"
+                            class="btn btn-primary flex-1 py-3 px-6 font-semibold"
+                        >
+                            <div v-if="createPoolLoading" class="loading-spinner mr-2"></div>
+                            <i v-else class="fas fa-plus mr-2"></i>
+                            {{ createPoolLoading ? '创建中...' : '创建' }}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- 编辑共享池模态框 -->
+        <div v-if="showEditPoolModal" class="fixed inset-0 modal z-50 flex items-center justify-center p-4">
+            <div class="modal-content w-full max-w-md p-8 mx-auto max-h-[90vh] flex flex-col">
+                <div class="flex items-center justify-between mb-6">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center">
+                            <i class="fas fa-edit text-white"></i>
+                        </div>
+                        <h3 class="text-xl font-bold text-gray-900">编辑共享池</h3>
+                    </div>
+                    <button 
+                        @click="closeEditPoolModal"
+                        class="text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+                
+                <form @submit.prevent="updatePool" class="space-y-6 modal-scroll-content custom-scrollbar flex-1">
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-3">名称</label>
+                        <input 
+                            v-model="editPoolForm.name" 
+                            type="text" 
+                            required 
+                            class="form-input w-full"
+                            placeholder="为共享池取一个名称"
+                        >
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-3">描述（可选）</label>
+                        <textarea 
+                            v-model="editPoolForm.description" 
+                            class="form-input w-full"
+                            rows="3"
+                            placeholder="描述这个共享池的用途"
+                        ></textarea>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-3">优先级</label>
+                        <input 
+                            v-model.number="editPoolForm.priority" 
+                            type="number" 
+                            required 
+                            class="form-input w-full"
+                            placeholder="数字越大优先级越高"
+                            min="0"
+                            max="999"
+                        >
+                        <p class="text-xs text-gray-500 mt-1">API Key将优先使用高优先级的共享池</p>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-3">账户选择策略</label>
+                        <select v-model="editPoolForm.accountSelectionStrategy" class="form-input w-full">
+                            <option value="least_used">最少使用</option>
+                            <option value="round_robin">轮询</option>
+                            <option value="random">随机</option>
+                        </select>
+                        <p class="text-xs text-gray-500 mt-1">
+                            <span v-if="editPoolForm.accountSelectionStrategy === 'least_used'">选择使用次数最少的账户</span>
+                            <span v-else-if="editPoolForm.accountSelectionStrategy === 'round_robin'">按顺序轮流使用账户</span>
+                            <span v-else>随机选择一个账户</span>
+                        </p>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-3">激活状态</label>
+                        <div class="flex items-center gap-3">
+                            <label class="flex items-center">
+                                <input 
+                                    v-model="editPoolForm.isActive" 
+                                    type="checkbox"
+                                    class="form-checkbox"
+                                >
+                                <span class="ml-2 text-sm text-gray-700">激活此共享池</span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="flex gap-3 pt-4">
+                        <button 
+                            type="button" 
+                            @click="closeEditPoolModal" 
+                            class="flex-1 px-6 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition-colors"
+                        >
+                            取消
+                        </button>
+                        <button 
+                            type="submit" 
+                            :disabled="updatePoolLoading"
+                            class="btn btn-primary flex-1 py-3 px-6 font-semibold"
+                        >
+                            <div v-if="updatePoolLoading" class="loading-spinner mr-2"></div>
+                            <i v-else class="fas fa-save mr-2"></i>
+                            {{ updatePoolLoading ? '保存中...' : '保存' }}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- 管理共享池账户模态框 -->
+        <div v-if="showManagePoolAccountsModal" class="fixed inset-0 modal z-50 flex items-center justify-center p-4">
+            <div class="modal-content w-full max-w-2xl p-8 mx-auto max-h-[90vh] flex flex-col">
+                <div class="flex items-center justify-between mb-6">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center">
+                            <i class="fas fa-users text-white"></i>
+                        </div>
+                        <h3 class="text-xl font-bold text-gray-900">管理共享池账户</h3>
+                    </div>
+                    <button 
+                        @click="closeManagePoolAccountsModal"
+                        class="text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+                
+                <div v-if="currentManagePool" class="mb-4">
+                    <p class="text-gray-600">共享池: <span class="font-semibold text-gray-900">{{ currentManagePool.name }}</span></p>
+                </div>
+                
+                <!-- 选项卡 -->
+                <div class="flex gap-2 mb-6 bg-gray-100 rounded-lg p-1">
+                    <button 
+                        @click="managePoolTab = 'current'"
+                        :class="['flex-1 py-2 px-4 text-sm font-medium rounded-md transition-colors',
+                                managePoolTab === 'current' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900']"
+                    >
+                        当前账户 ({{ poolAccounts.length }})
+                    </button>
+                    <button 
+                        @click="managePoolTab = 'available'"
+                        :class="['flex-1 py-2 px-4 text-sm font-medium rounded-md transition-colors',
+                                managePoolTab === 'available' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900']"
+                    >
+                        可用账户 ({{ availablePoolAccounts.length }})
+                    </button>
+                </div>
+                
+                <div class="modal-scroll-content custom-scrollbar flex-1">
+                    <!-- 当前账户列表 -->
+                    <div v-if="managePoolTab === 'current'">
+                        <div v-if="poolAccounts.length === 0" class="text-center py-12">
+                            <p class="text-gray-500">此共享池中还没有账户</p>
+                        </div>
+                        <div v-else class="space-y-2">
+                            <div v-for="account in poolAccounts" :key="account.id" 
+                                 class="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                                <div>
+                                    <p class="font-medium text-gray-900">{{ account.name }}</p>
+                                    <p class="text-sm text-gray-500">{{ account.email || account.id }}</p>
+                                </div>
+                                <button 
+                                    @click="removeAccountFromPool(account.id)"
+                                    :disabled="removeAccountFromPoolLoading[account.id]"
+                                    class="btn btn-danger px-4 py-2"
+                                >
+                                    <div v-if="removeAccountFromPoolLoading[account.id]" class="loading-spinner mr-2"></div>
+                                    <i v-else class="fas fa-minus mr-2"></i>
+                                    移除
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 可用账户列表 -->
+                    <div v-if="managePoolTab === 'available'">
+                        <div v-if="availablePoolAccounts.length === 0" class="text-center py-12">
+                            <p class="text-gray-500">没有可添加的账户</p>
+                        </div>
+                        <div v-else class="space-y-2">
+                            <div v-for="account in availablePoolAccounts" :key="account.id" 
+                                 class="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                                <div>
+                                    <p class="font-medium text-gray-900">{{ account.name }}</p>
+                                    <p class="text-sm text-gray-500">{{ account.email || account.id }}</p>
+                                </div>
+                                <button 
+                                    @click="addAccountToPool(account.id)"
+                                    :disabled="addAccountToPoolLoading[account.id]"
+                                    class="btn btn-primary px-4 py-2"
+                                >
+                                    <div v-if="addAccountToPoolLoading[account.id]" class="loading-spinner mr-2"></div>
+                                    <i v-else class="fas fa-plus mr-2"></i>
+                                    添加
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="flex gap-3 pt-4">
+                    <button 
+                        @click="closeManagePoolAccountsModal" 
+                        class="flex-1 px-6 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition-colors"
+                    >
+                        关闭
                     </button>
                 </div>
             </div>
