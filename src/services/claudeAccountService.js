@@ -467,10 +467,10 @@ class ClaudeAccountService {
   }
 
   // 🎯 基于API Key选择账户（支持专属绑定和共享池）
-  async selectAccountForApiKey(apiKeyData, sessionHash = null) {
+  async selectAccountForApiKey(apiKeyData, sessionHash = null, excludeAccountIds = null) {
     try {
       // 如果API Key绑定了专属账户，优先使用
-      if (apiKeyData.claudeAccountId) {
+      if (apiKeyData.claudeAccountId && (!excludeAccountIds || !excludeAccountIds.has(apiKeyData.claudeAccountId))) {
         const boundAccount = await redis.getClaudeAccount(apiKeyData.claudeAccountId);
         if (boundAccount && boundAccount.isActive === 'true' && boundAccount.status !== 'error') {
           logger.info(`🎯 Using bound dedicated account: ${boundAccount.name} (${apiKeyData.claudeAccountId}) for API key ${apiKeyData.name}`);
@@ -483,18 +483,24 @@ class ClaudeAccountService {
       // 如果没有绑定账户或绑定账户不可用，从共享池选择
       const accounts = await redis.getAllClaudeAccounts();
       
-      const sharedAccounts = accounts.filter(account => 
+      let sharedAccounts = accounts.filter(account => 
         account.isActive === 'true' && 
         account.status !== 'error' &&
         (account.accountType === 'shared' || !account.accountType) // 兼容旧数据
       );
+
+      // 排除已使用的账户
+      if (excludeAccountIds && excludeAccountIds.size > 0) {
+        sharedAccounts = sharedAccounts.filter(account => !excludeAccountIds.has(account.id));
+        logger.info(`🔍 Excluding ${excludeAccountIds.size} already used accounts, ${sharedAccounts.length} accounts remaining`);
+      }
 
       if (sharedAccounts.length === 0) {
         throw new Error('No active shared Claude accounts available');
       }
 
       // 如果有会话哈希，检查是否有已映射的账户
-      if (sessionHash) {
+      if (sessionHash && (!excludeAccountIds || excludeAccountIds.size === 0)) {
         const mappedAccountId = await redis.getSessionAccountMapping(sessionHash);
         if (mappedAccountId) {
           // 验证映射的账户是否仍然在共享池中且可用
@@ -815,6 +821,62 @@ class ClaudeAccountService {
     } catch (error) {
       logger.error(`❌ Failed to get rate limit info for account: ${accountId}`, error);
       return null;
+    }
+  }
+
+  // 🔍 获取账户原始数据（内部使用）
+  async _getAccountData(accountId) {
+    try {
+      return await redis.getClaudeAccount(accountId);
+    } catch (error) {
+      logger.error(`❌ Failed to get account data: ${accountId}`, error);
+      return null;
+    }
+  }
+
+  // 📝 更新账户原始数据（内部使用）
+  async _updateAccountData(accountId, accountData) {
+    try {
+      await redis.setClaudeAccount(accountId, accountData);
+      return true;
+    } catch (error) {
+      logger.error(`❌ Failed to update account data: ${accountId}`, error);
+      return false;
+    }
+  }
+
+  // 🚫 标记账号为不活跃
+  async markAccountInactive(accountId, reason = '') {
+    try {
+      const accountData = await redis.getClaudeAccount(accountId);
+      if (!accountData || Object.keys(accountData).length === 0) {
+        throw new Error('Account not found');
+      }
+
+      // 设置账号为不活跃状态
+      accountData.isActive = 'false';
+      accountData.status = 'error';
+      accountData.errorMessage = reason || 'Account marked as inactive';
+      accountData.deactivatedAt = new Date().toISOString();
+      
+      await redis.setClaudeAccount(accountId, accountData);
+
+      // 删除所有相关的会话映射
+      const client = redis.getClient();
+      const sessionKeys = await client.keys('session_account_mapping:*');
+      
+      for (const key of sessionKeys) {
+        const mappedAccountId = await client.get(key);
+        if (mappedAccountId === accountId) {
+          await client.del(key);
+        }
+      }
+
+      logger.warn(`🚫 Account marked as inactive: ${accountData.name} (${accountId}) - Reason: ${reason}`);
+      return { success: true };
+    } catch (error) {
+      logger.error(`❌ Failed to mark account as inactive: ${accountId}`, error);
+      throw error;
     }
   }
 }

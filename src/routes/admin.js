@@ -9,6 +9,7 @@ const oauthHelper = require('../utils/oauthHelper');
 const CostCalculator = require('../utils/costCalculator');
 const pricingService = require('../services/pricingService');
 const claudeCodeHeadersService = require('../services/claudeCodeHeadersService');
+const accountHealthCheckService = require('../services/accountHealthCheckService');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
@@ -758,6 +759,63 @@ router.post('/claude-accounts/:accountId/refresh', authenticateAdmin, async (req
   }
 });
 
+// 手动健康检查
+router.post('/claude-accounts/:accountId/health-check', authenticateAdmin, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    
+    // 获取账户信息
+    const accountData = await claudeAccountService._getAccountData(accountId);
+    if (!accountData) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+    
+    // 执行健康检查
+    let isHealthy = false;
+    let error = null;
+    
+    try {
+      // 尝试获取有效的访问token（会自动刷新过期的token）
+      const accessToken = await claudeAccountService.getValidAccessToken(accountId);
+      
+      if (accessToken) {
+        // 如果能获取到token，进行一个简单的API调用测试
+        const testResult = await require('../services/claudeRelayService').testAccountHealth(accountId);
+        isHealthy = testResult.success;
+        if (!testResult.success) {
+          error = testResult.error || 'Health check failed';
+        }
+      } else {
+        isHealthy = false;
+        error = 'No valid access token';
+      }
+    } catch (checkError) {
+      isHealthy = false;
+      error = checkError.message;
+      
+      // 如果是OAuth token revoked错误，标记账户为不活跃
+      if (error.includes('OAuth token revoked') || error.includes('authentication_error')) {
+        await claudeAccountService.markAccountInactive(accountId, error);
+      }
+    }
+    
+    logger.info(`🏥 Health check for Claude account ${accountId}: ${isHealthy ? 'Healthy' : 'Unhealthy'}`);
+    
+    res.json({ 
+      success: true, 
+      data: {
+        accountId,
+        isHealthy,
+        error,
+        checkedAt: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    logger.error('❌ Failed to perform health check:', error);
+    res.status(500).json({ error: 'Failed to perform health check', message: error.message });
+  }
+});
+
 // 🤖 Gemini 账户管理
 
 // 生成 Gemini OAuth 授权 URL
@@ -1094,6 +1152,32 @@ router.get('/usage-stats', authenticateAdmin, async (req, res) => {
   } catch (error) {
     logger.error('❌ Failed to get usage stats:', error);
     res.status(500).json({ error: 'Failed to get usage stats', message: error.message });
+  }
+});
+
+// 🏥 获取账户健康检查统计
+router.get('/health-stats', authenticateAdmin, async (req, res) => {
+  try {
+    const stats = await accountHealthCheckService.getHealthStats();
+    res.json({ success: true, data: stats });
+  } catch (error) {
+    logger.error('❌ Failed to get health stats:', error);
+    res.status(500).json({ error: 'Failed to get health stats', message: error.message });
+  }
+});
+
+// 🏥 手动触发健康检查
+router.post('/health-check', authenticateAdmin, async (req, res) => {
+  try {
+    logger.info('🏥 Manual health check triggered by admin');
+    // 异步执行健康检查，不等待完成
+    accountHealthCheckService.checkAllAccounts().catch(error => {
+      logger.error('❌ Health check failed:', error);
+    });
+    res.json({ success: true, message: 'Health check started' });
+  } catch (error) {
+    logger.error('❌ Failed to trigger health check:', error);
+    res.status(500).json({ error: 'Failed to trigger health check', message: error.message });
   }
 });
 

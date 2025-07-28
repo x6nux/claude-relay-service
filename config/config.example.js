@@ -108,6 +108,12 @@ const config = {
     allowCustomClients: process.env.ALLOW_CUSTOM_CLIENTS === 'true'
   },
 
+  // 🏥 健康检查配置
+  healthCheck: {
+    intervalMinutes: parseInt(process.env.HEALTH_CHECK_INTERVAL_MINUTES) || 30, // 默认30分钟
+    enabled: process.env.HEALTH_CHECK_ENABLED !== 'false' // 默认启用
+  },
+
   // 🛠️ 开发配置
   development: {
     debug: process.env.DEBUG === 'true',

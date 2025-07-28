@@ -62,6 +62,15 @@ class Application {
         logger.info(`💰 Cost initialization completed: ${result.processed} processed, ${result.errors} errors`);
       }
       
+      // 🏥 启动账户健康检查服务
+      if (config.healthCheck?.enabled !== false) {
+        logger.info('🏥 Starting account health check service...');
+        const accountHealthCheckService = require('./services/accountHealthCheckService');
+        accountHealthCheckService.start();
+      } else {
+        logger.info('🏥 Account health check service is disabled');
+      }
+      
       // 🛡️ 安全中间件
       this.app.use(helmet({
         contentSecurityPolicy: false, // 允许内联样式和脚本

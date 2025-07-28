@@ -735,7 +735,7 @@
                                                 </div>
                                             </td>
                                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                {{ new Date(key.createdAt).toLocaleDateString() }}
+                                                {{ new Date(key.createdAt).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) }}
                                             </td>
                                             <td class="px-6 py-4 whitespace-nowrap text-sm">
                                                 <div v-if="key.expiresAt">
@@ -1068,11 +1068,28 @@
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap">
                                             <div class="flex flex-col gap-1">
+                                                <!-- 活跃状态 -->
                                                 <span :class="['inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold', 
-                                                             account.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800']">
+                                                             account.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800']">
                                                     <div :class="['w-2 h-2 rounded-full mr-2', 
-                                                               account.isActive ? 'bg-green-500' : 'bg-red-500']"></div>
-                                                    {{ account.isActive ? '正常' : '异常' }}
+                                                               account.isActive ? 'bg-green-500' : 'bg-gray-500']"></div>
+                                                    {{ account.isActive ? '活跃' : '不活跃' }}
+                                                </span>
+                                                <!-- 状态详情 -->
+                                                <span v-if="account.status === 'error'" 
+                                                      class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800">
+                                                    <i class="fas fa-exclamation-circle mr-1"></i>
+                                                    {{ account.errorMessage || '错误' }}
+                                                </span>
+                                                <span v-else-if="account.status === 'created'" 
+                                                      class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
+                                                    <i class="fas fa-clock mr-1"></i>
+                                                    待激活
+                                                </span>
+                                                <span v-else-if="account.status === 'active'" 
+                                                      class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800">
+                                                    <i class="fas fa-check-circle mr-1"></i>
+                                                    正常
                                                 </span>
                                                 <span v-if="account.rateLimitStatus && account.rateLimitStatus.isRateLimited" 
                                                       class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-800">
@@ -1108,9 +1125,17 @@
                                             <div v-else class="text-gray-400 text-xs">暂无数据</div>
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            {{ account.lastUsedAt ? new Date(account.lastUsedAt).toLocaleDateString() : '从未使用' }}
+                                            {{ account.lastUsedAt ? new Date(account.lastUsedAt).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '从未使用' }}
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm space-x-2">
+                                            <button 
+                                                @click="checkAccountHealth(account)" 
+                                                class="text-green-600 hover:text-green-900 font-medium hover:bg-green-50 px-3 py-1 rounded-lg transition-colors"
+                                                :disabled="account.healthChecking"
+                                            >
+                                                <i :class="[account.healthChecking ? 'fas fa-spinner fa-spin' : 'fas fa-heartbeat', 'mr-1']"></i>
+                                                {{ account.healthChecking ? '检查中' : '健康检查' }}
+                                            </button>
                                             <button 
                                                 @click="openEditAccountModal(account)" 
                                                 class="text-blue-600 hover:text-blue-900 font-medium hover:bg-blue-50 px-3 py-1 rounded-lg transition-colors"
@@ -3632,6 +3657,7 @@
                         </div>
                     </div>
                     
+                    <!-- 更新方式选择 -->
                     <div class="bg-amber-50 p-4 rounded-lg border border-amber-200">
                         <div class="flex items-start gap-3 mb-4">
                             <div class="w-8 h-8 bg-amber-500 rounded-lg flex items-center justify-center flex-shrink-0 mt-1">
@@ -3639,12 +3665,42 @@
                             </div>
                             <div>
                                 <h5 class="font-semibold text-amber-900 mb-2">更新 Token</h5>
-                                <p class="text-sm text-amber-800 mb-2">可以更新 Access Token 和 Refresh Token。为了安全起见，不会显示当前的 Token 值。</p>
-                                <p class="text-xs text-amber-600">💡 留空表示不更新该字段。</p>
+                                <p class="text-sm text-amber-800">选择更新Token的方式</p>
                             </div>
                         </div>
                         
-                        <div class="space-y-4">
+                        <!-- 更新方式选择标签 -->
+                        <div class="flex gap-2 mb-4">
+                            <button 
+                                @click="editAccountForm.updateMethod = 'manual'"
+                                :class="[
+                                    'px-4 py-2 rounded-lg font-medium transition-all',
+                                    editAccountForm.updateMethod === 'manual' 
+                                        ? 'bg-amber-600 text-white' 
+                                        : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                                ]"
+                            >
+                                <i class="fas fa-keyboard mr-2"></i>手动输入
+                            </button>
+                            <button 
+                                v-if="editAccountForm.platform === 'claude'"
+                                @click="editAccountForm.updateMethod = 'oauth'"
+                                :class="[
+                                    'px-4 py-2 rounded-lg font-medium transition-all',
+                                    editAccountForm.updateMethod === 'oauth' 
+                                        ? 'bg-amber-600 text-white' 
+                                        : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                                ]"
+                            >
+                                <i class="fas fa-link mr-2"></i>OAuth 授权
+                            </button>
+                        </div>
+                        
+                        <!-- 手动输入Token -->
+                        <div v-if="editAccountForm.updateMethod === 'manual'" class="space-y-4">
+                            <p class="text-sm text-amber-800 mb-2">可以更新 Access Token 和 Refresh Token。为了安全起见，不会显示当前的 Token 值。</p>
+                            <p class="text-xs text-amber-600 mb-4">💡 留空表示不更新该字段。</p>
+                            
                             <div>
                                 <label class="block text-sm font-semibold text-gray-700 mb-3">Access Token</label>
                                 <textarea 
@@ -3664,6 +3720,72 @@
                                     placeholder="留空表示不更新，否则输入新的 Refresh Token"
                                 ></textarea>
                                 <p class="text-xs text-gray-500 mt-2">如果有 Refresh Token，填写后系统可以自动刷新过期的 Access Token</p>
+                            </div>
+                        </div>
+                        
+                        <!-- OAuth授权更新 -->
+                        <div v-if="editAccountForm.updateMethod === 'oauth'" class="space-y-4">
+                            <p class="text-sm text-amber-800 mb-2">通过OAuth重新授权来更新Token</p>
+                            
+                            <!-- 获取授权URL -->
+                            <div v-if="!editOauthData.authUrl" class="text-center py-6">
+                                <button 
+                                    @click="generateEditAuthUrl()" 
+                                    :disabled="editAuthUrlLoading"
+                                    class="btn btn-primary px-6 py-2 font-medium"
+                                >
+                                    <div v-if="editAuthUrlLoading" class="loading-spinner mr-2"></div>
+                                    <i v-else class="fas fa-magic mr-2"></i>
+                                    {{ editAuthUrlLoading ? '生成中...' : '生成授权链接' }}
+                                </button>
+                            </div>
+                            
+                            <!-- 显示授权URL和输入框 -->
+                            <div v-if="editOauthData.authUrl">
+                                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                                    <div class="flex items-start gap-3">
+                                        <div class="w-6 h-6 bg-blue-500 rounded flex items-center justify-center flex-shrink-0 mt-1">
+                                            <i class="fas fa-info text-white text-xs"></i>
+                                        </div>
+                                        <div>
+                                            <h5 class="font-semibold text-blue-900 mb-2 text-sm">操作说明</h5>
+                                            <ol class="text-xs text-blue-800 space-y-1 list-decimal list-inside">
+                                                <li>点击下方按钮打开授权页面</li>
+                                                <li>使用您的Claude账号登录</li>
+                                                <li>复制页面显示的授权码</li>
+                                                <li>将授权码粘贴到下方输入框</li>
+                                            </ol>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="flex gap-3 mb-4">
+                                    <a 
+                                        :href="editOauthData.authUrl" 
+                                        target="_blank" 
+                                        class="btn btn-primary px-4 py-2 font-medium text-sm"
+                                    >
+                                        <i class="fas fa-external-link-alt mr-2"></i>
+                                        打开授权页面
+                                    </a>
+                                    <button 
+                                        @click="copyEditAuthUrl()" 
+                                        class="btn-secondary px-4 py-2 font-medium text-sm"
+                                    >
+                                        <i class="fas fa-copy mr-2"></i>
+                                        复制链接
+                                    </button>
+                                </div>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">授权码</label>
+                                    <textarea 
+                                        v-model="editOauthData.authCode" 
+                                        rows="3" 
+                                        class="form-input w-full resize-none font-mono text-sm"
+                                        placeholder="粘贴授权页面显示的授权码..."
+                                    ></textarea>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -3735,6 +3857,7 @@
                         取消
                     </button>
                     <button 
+                        v-if="editAccountForm.updateMethod === 'manual' || !editAccountForm.updateMethod"
                         type="button" 
                         @click="updateAccount()"
                         :disabled="!editAccountForm.name || editAccountLoading"
@@ -3743,6 +3866,17 @@
                         <div v-if="editAccountLoading" class="loading-spinner mr-2"></div>
                         <i v-else class="fas fa-save mr-2"></i>
                         {{ editAccountLoading ? '更新中...' : '保存修改' }}
+                    </button>
+                    <button 
+                        v-if="editAccountForm.updateMethod === 'oauth'"
+                        type="button" 
+                        @click="updateAccountWithOAuth()"
+                        :disabled="!editAccountForm.name || !editOauthData.authCode || editAccountLoading"
+                        class="btn btn-primary flex-1 py-3 px-6 font-semibold"
+                    >
+                        <div v-if="editAccountLoading" class="loading-spinner mr-2"></div>
+                        <i v-else class="fas fa-check mr-2"></i>
+                        {{ editAccountLoading ? '更新中...' : '更新账户' }}
                     </button>
                 </div>
             </div>

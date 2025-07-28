@@ -56,137 +56,237 @@ class ClaudeRelayService {
 
   // 🚀 转发请求到Claude API
   async relayRequest(requestBody, apiKeyData, clientRequest, clientResponse, clientHeaders, options = {}) {
-    let upstreamRequest = null;
+    const maxRetries = options.maxRetries || 3; // 默认重试3次
+    let lastResponse = null;
+    let lastError = null;
+    let usedAccountIds = new Set(); // 记录已使用的账户ID，避免重复使用
     
-    try {
-      // 调试日志：查看API Key数据
-      logger.info('🔍 API Key data received:', {
-        apiKeyName: apiKeyData.name,
-        enableModelRestriction: apiKeyData.enableModelRestriction,
-        restrictedModels: apiKeyData.restrictedModels,
-        requestedModel: requestBody.model
-      });
+    for (let retryCount = 0; retryCount < maxRetries; retryCount++) {
+      let upstreamRequest = null;
+      
+      try {
+        // 调试日志：查看API Key数据
+        if (retryCount === 0) {
+          logger.info('🔍 API Key data received:', {
+            apiKeyName: apiKeyData.name,
+            enableModelRestriction: apiKeyData.enableModelRestriction,
+            restrictedModels: apiKeyData.restrictedModels,
+            requestedModel: requestBody.model
+          });
+        }
 
-      // 检查模型限制
-      if (apiKeyData.enableModelRestriction && apiKeyData.restrictedModels && apiKeyData.restrictedModels.length > 0) {
-        const requestedModel = requestBody.model;
-        logger.info(`🔒 Model restriction check - Requested model: ${requestedModel}, Restricted models: ${JSON.stringify(apiKeyData.restrictedModels)}`);
-        
-        if (requestedModel && apiKeyData.restrictedModels.includes(requestedModel)) {
-          logger.warn(`🚫 Model restriction violation for key ${apiKeyData.name}: Attempted to use restricted model ${requestedModel}`);
-          return {
-            statusCode: 403,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              error: {
-                type: 'forbidden',
-                message: '暂无该模型访问权限'
-              }
-            })
-          };
-        }
-      }
-      
-      // 生成会话哈希用于sticky会话
-      const sessionHash = sessionHelper.generateSessionHash(requestBody);
-      
-      // 选择可用的Claude账户（支持专属绑定和sticky会话）
-      const accountId = await claudeAccountService.selectAccountForApiKey(apiKeyData, sessionHash);
-      
-      logger.info(`📤 Processing API request for key: ${apiKeyData.name || apiKeyData.id}, account: ${accountId}${sessionHash ? `, session: ${sessionHash}` : ''}`);
-      
-      // 获取有效的访问token
-      const accessToken = await claudeAccountService.getValidAccessToken(accountId);
-      
-      // 处理请求体（传递 clientHeaders 以判断是否需要设置 Claude Code 系统提示词）
-      const processedBody = this._processRequestBody(requestBody, clientHeaders);
-      
-      // 获取代理配置
-      const proxyAgent = await this._getProxyAgent(accountId);
-      
-      // 设置客户端断开监听器
-      const handleClientDisconnect = () => {
-        logger.info('🔌 Client disconnected, aborting upstream request');
-        if (upstreamRequest && !upstreamRequest.destroyed) {
-          upstreamRequest.destroy();
-        }
-      };
-      
-      // 监听客户端断开事件
-      if (clientRequest) {
-        clientRequest.once('close', handleClientDisconnect);
-      }
-      if (clientResponse) {
-        clientResponse.once('close', handleClientDisconnect);
-      }
-      
-      // 发送请求到Claude API（传入回调以获取请求对象）
-      const response = await this._makeClaudeRequest(
-        processedBody, 
-        accessToken, 
-        proxyAgent,
-        clientHeaders,
-        accountId,
-        (req) => { upstreamRequest = req; },
-        options
-      );
-      
-      // 移除监听器（请求成功完成）
-      if (clientRequest) {
-        clientRequest.removeListener('close', handleClientDisconnect);
-      }
-      if (clientResponse) {
-        clientResponse.removeListener('close', handleClientDisconnect);
-      }
-      
-      // 检查响应是否为限流错误
-      if (response.statusCode !== 200 && response.statusCode !== 201) {
-        let isRateLimited = false;
-        try {
-          const responseBody = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
-          if (responseBody && responseBody.error && responseBody.error.message && 
-              responseBody.error.message.toLowerCase().includes('exceed your account\'s rate limit')) {
-            isRateLimited = true;
+        // 检查模型限制
+        if (apiKeyData.enableModelRestriction && apiKeyData.restrictedModels && apiKeyData.restrictedModels.length > 0) {
+          const requestedModel = requestBody.model;
+          if (retryCount === 0) {
+            logger.info(`🔒 Model restriction check - Requested model: ${requestedModel}, Restricted models: ${JSON.stringify(apiKeyData.restrictedModels)}`);
           }
-        } catch (e) {
-          // 如果解析失败，检查原始字符串
-          if (response.body && response.body.toLowerCase().includes('exceed your account\'s rate limit')) {
-            isRateLimited = true;
+          
+          if (requestedModel && apiKeyData.restrictedModels.includes(requestedModel)) {
+            logger.warn(`🚫 Model restriction violation for key ${apiKeyData.name}: Attempted to use restricted model ${requestedModel}`);
+            return {
+              statusCode: 403,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                error: {
+                  type: 'forbidden',
+                  message: '暂无该模型访问权限'
+                }
+              })
+            };
           }
         }
         
-        if (isRateLimited) {
-          logger.warn(`🚫 Rate limit detected for account ${accountId}, status: ${response.statusCode}`);
-          // 标记账号为限流状态并删除粘性会话映射
+        // 生成会话哈希用于sticky会话
+        const sessionHash = sessionHelper.generateSessionHash(requestBody);
+        
+        // 选择可用的Claude账户（支持专属绑定和sticky会话）
+        let accountId;
+        if (retryCount === 0) {
+          accountId = await claudeAccountService.selectAccountForApiKey(apiKeyData, sessionHash);
+        } else {
+          // 重试时，需要选择不同的账户
+          accountId = await claudeAccountService.selectAccountForApiKey(apiKeyData, null, usedAccountIds);
+          logger.info(`🔄 Retry ${retryCount}/${maxRetries - 1}: Switching to new account ${accountId}`);
+        }
+        
+        // 记录已使用的账户
+        usedAccountIds.add(accountId);
+        
+        logger.info(`📤 Processing API request for key: ${apiKeyData.name || apiKeyData.id}, account: ${accountId}${sessionHash ? `, session: ${sessionHash}` : ''}${retryCount > 0 ? `, retry: ${retryCount}` : ''}`);
+        
+        // 获取有效的访问token
+        const accessToken = await claudeAccountService.getValidAccessToken(accountId);
+        
+        // 处理请求体（传递 clientHeaders 以判断是否需要设置 Claude Code 系统提示词）
+        const processedBody = this._processRequestBody(requestBody, clientHeaders);
+        
+        // 获取代理配置
+        const proxyAgent = await this._getProxyAgent(accountId);
+        
+        // 设置客户端断开监听器
+        const handleClientDisconnect = () => {
+          logger.info('🔌 Client disconnected, aborting upstream request');
+          if (upstreamRequest && !upstreamRequest.destroyed) {
+            upstreamRequest.destroy();
+          }
+        };
+        
+        // 监听客户端断开事件
+        if (clientRequest) {
+          clientRequest.once('close', handleClientDisconnect);
+        }
+        if (clientResponse) {
+          clientResponse.once('close', handleClientDisconnect);
+        }
+        
+        // 发送请求到Claude API（传入回调以获取请求对象）
+        const response = await this._makeClaudeRequest(
+          processedBody, 
+          accessToken, 
+          proxyAgent,
+          clientHeaders,
+          accountId,
+          (req) => { upstreamRequest = req; },
+          options
+        );
+        
+        // 移除监听器（请求成功完成）
+        if (clientRequest) {
+          clientRequest.removeListener('close', handleClientDisconnect);
+        }
+        if (clientResponse) {
+          clientResponse.removeListener('close', handleClientDisconnect);
+        }
+        
+        // 检查响应状态
+        if (response.statusCode === 429) {
+          // 429状态码，需要重试
+          logger.warn(`🚫 Rate limit (429) detected for account ${accountId}`);
           await claudeAccountService.markAccountRateLimited(accountId, sessionHash);
-        }
-      } else if (response.statusCode === 200 || response.statusCode === 201) {
-        // 如果请求成功，检查并移除限流状态
-        const isRateLimited = await claudeAccountService.isAccountRateLimited(accountId);
-        if (isRateLimited) {
-          await claudeAccountService.removeAccountRateLimit(accountId);
+          lastResponse = response;
+          
+          // 如果还有重试次数，继续下一次重试
+          if (retryCount < maxRetries - 1) {
+            // 指数退避延迟
+            const delay = Math.min(1000 * Math.pow(2, retryCount), 10000); // 最长10秒
+            logger.info(`⏳ Waiting ${delay}ms before retry...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+        } else if (response.statusCode !== 200 && response.statusCode !== 201) {
+          // 检查其他错误类型
+          let isRateLimited = false;
+          let isTokenRevoked = false;
+          
+          try {
+            const responseBody = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
+            
+            // 检查是否是限流错误
+            if (responseBody && responseBody.error && responseBody.error.message) {
+              const errorMessage = responseBody.error.message.toLowerCase();
+              if (errorMessage.includes('exceed your account\'s rate limit')) {
+                isRateLimited = true;
+              }
+              // 检查是否是OAuth token被撤销的错误
+              else if (errorMessage.includes('oauth token revoked') || 
+                       errorMessage.includes('please run /login') ||
+                       errorMessage.includes('authentication_error')) {
+                isTokenRevoked = true;
+              }
+            }
+          } catch (e) {
+            // 如果解析失败，检查原始字符串
+            if (response.body) {
+              const bodyLower = response.body.toLowerCase();
+              if (bodyLower.includes('exceed your account\'s rate limit')) {
+                isRateLimited = true;
+              } else if (bodyLower.includes('oauth token revoked') || 
+                         bodyLower.includes('please run /login') ||
+                         bodyLower.includes('authentication_error')) {
+                isTokenRevoked = true;
+              }
+            }
+          }
+          
+          if (isTokenRevoked) {
+            logger.warn(`🔐 OAuth token revoked for account ${accountId}`);
+            // 标记账号为不活跃
+            await claudeAccountService.markAccountInactive(accountId, 'OAuth token revoked');
+            lastResponse = response;
+            
+            // 如果还有重试次数，切换账号继续重试
+            if (retryCount < maxRetries - 1) {
+              logger.info(`🔄 OAuth token revoked, switching to a different account...`);
+              continue;
+            }
+          } else if (isRateLimited) {
+            logger.warn(`🚫 Rate limit detected for account ${accountId}, status: ${response.statusCode}`);
+            // 标记账号为限流状态并删除粘性会话映射
+            await claudeAccountService.markAccountRateLimited(accountId, sessionHash);
+            lastResponse = response;
+            
+            // 如果还有重试次数，继续下一次重试
+            if (retryCount < maxRetries - 1) {
+              const delay = Math.min(1000 * Math.pow(2, retryCount), 10000);
+              logger.info(`⏳ Waiting ${delay}ms before retry...`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+              continue;
+            }
+          }
+        } else if (response.statusCode === 200 || response.statusCode === 201) {
+          // 请求成功
+          // 如果请求成功，检查并移除限流状态
+          const isRateLimited = await claudeAccountService.isAccountRateLimited(accountId);
+          if (isRateLimited) {
+            await claudeAccountService.removeAccountRateLimit(accountId);
+          }
+          
+          // 只有真实的 Claude Code 请求才更新 headers
+          if (clientHeaders && Object.keys(clientHeaders).length > 0 && this.isRealClaudeCodeRequest(requestBody, clientHeaders)) {
+            await claudeCodeHeadersService.storeAccountHeaders(accountId, clientHeaders);
+          }
+          
+          // 记录成功的API调用
+          const inputTokens = requestBody.messages ? 
+            requestBody.messages.reduce((sum, msg) => sum + (msg.content?.length || 0), 0) / 4 : 0; // 粗略估算
+          const outputTokens = response.content ? 
+            response.content.reduce((sum, content) => sum + (content.text?.length || 0), 0) / 4 : 0;
+          
+          logger.info(`✅ API request completed - Key: ${apiKeyData.name}, Account: ${accountId}, Model: ${requestBody.model}, Input: ~${Math.round(inputTokens)} tokens, Output: ~${Math.round(outputTokens)} tokens`);
+          
+          // 在响应中添加accountId，以便调用方记录账户级别统计
+          response.accountId = accountId;
+          return response;
         }
         
-        // 只有真实的 Claude Code 请求才更新 headers
-        if (clientHeaders && Object.keys(clientHeaders).length > 0 && this.isRealClaudeCodeRequest(requestBody, clientHeaders)) {
-          await claudeCodeHeadersService.storeAccountHeaders(accountId, clientHeaders);
+        // 其他错误，直接返回
+        lastResponse = response;
+        break;
+        
+      } catch (error) {
+        logger.error(`❌ Claude relay request failed for key: ${apiKeyData.name || apiKeyData.id}, retry: ${retryCount}:`, error.message);
+        lastError = error;
+        
+        // 如果还有重试次数，继续下一次重试
+        if (retryCount < maxRetries - 1) {
+          const delay = Math.min(1000 * Math.pow(2, retryCount), 10000);
+          logger.info(`⏳ Waiting ${delay}ms before retry...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
         }
       }
-      
-      // 记录成功的API调用
-      const inputTokens = requestBody.messages ? 
-        requestBody.messages.reduce((sum, msg) => sum + (msg.content?.length || 0), 0) / 4 : 0; // 粗略估算
-      const outputTokens = response.content ? 
-        response.content.reduce((sum, content) => sum + (content.text?.length || 0), 0) / 4 : 0;
-      
-      logger.info(`✅ API request completed - Key: ${apiKeyData.name}, Account: ${accountId}, Model: ${requestBody.model}, Input: ~${Math.round(inputTokens)} tokens, Output: ~${Math.round(outputTokens)} tokens`);
-      
-      // 在响应中添加accountId，以便调用方记录账户级别统计
-      response.accountId = accountId;
-      return response;
-    } catch (error) {
-      logger.error(`❌ Claude relay request failed for key: ${apiKeyData.name || apiKeyData.id}:`, error.message);
-      throw error;
+    }
+    
+    // 所有重试都失败了
+    if (lastResponse) {
+      logger.error(`❌ All retries exhausted. Final response status: ${lastResponse.statusCode}`);
+      return lastResponse;
+    } else if (lastError) {
+      logger.error(`❌ All retries exhausted. Final error: ${lastError.message}`);
+      throw lastError;
+    } else {
+      throw new Error('Unexpected error: No response or error recorded');
     }
   }
 
@@ -776,11 +876,25 @@ class ClaudeRelayService {
                   }
                 }
                 
-                // 检查是否有限流错误
-                if (data.type === 'error' && data.error && data.error.message && 
-                    data.error.message.toLowerCase().includes('exceed your account\'s rate limit')) {
-                  rateLimitDetected = true;
-                  logger.warn(`🚫 Rate limit detected in stream for account ${accountId}`);
+                // 检查是否有错误
+                if (data.type === 'error' && data.error && data.error.message) {
+                  const errorMessage = data.error.message.toLowerCase();
+                  
+                  // 检查是否有限流错误
+                  if (errorMessage.includes('exceed your account\'s rate limit')) {
+                    rateLimitDetected = true;
+                    logger.warn(`🚫 Rate limit detected in stream for account ${accountId}`);
+                  }
+                  // 检查是否是OAuth token被撤销的错误
+                  else if (errorMessage.includes('oauth token revoked') || 
+                           errorMessage.includes('please run /login') ||
+                           errorMessage.includes('authentication_error')) {
+                    logger.warn(`🔐 OAuth token revoked detected in stream for account ${accountId}`);
+                    // 标记账号为不活跃
+                    claudeAccountService.markAccountInactive(accountId, 'OAuth token revoked in stream').catch(err => {
+                      logger.error(`❌ Failed to mark account as inactive: ${err.message}`);
+                    });
+                  }
                 }
                 
               } catch (parseError) {
@@ -1105,6 +1219,81 @@ class ClaudeRelayService {
         healthy: false,
         error: error.message,
         timestamp: new Date().toISOString()
+      };
+    }
+  }
+
+  // 🏥 测试账户健康状态
+  async testAccountHealth(accountId) {
+    try {
+      // 获取账户的访问token
+      const accessToken = await claudeAccountService.getValidAccessToken(accountId);
+      
+      if (!accessToken) {
+        return {
+          success: false,
+          error: 'No valid access token'
+        };
+      }
+
+      // 获取代理配置
+      const proxyAgent = await this._getProxyAgent(accountId);
+      
+      // 构建一个最小的测试请求
+      const testBody = {
+        model: 'claude-3-haiku-20240307',
+        messages: [{ role: 'user', content: 'Hi' }],
+        max_tokens: 1,
+        stream: false
+      };
+
+      // 发送测试请求
+      try {
+        const response = await this._makeClaudeRequest(
+          testBody, 
+          accessToken, 
+          proxyAgent,
+          {}, // 空的客户端headers
+          accountId,
+          null, // 不需要请求回调
+          { betaHeader: '' } // 不使用beta header
+        );
+        
+        // 检查响应状态
+        if (response.statusCode === 200 || response.statusCode === 201) {
+          return {
+            success: true,
+            statusCode: response.statusCode
+          };
+        } else {
+          // 解析错误信息
+          let errorMessage = `HTTP ${response.statusCode}`;
+          try {
+            const responseBody = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
+            if (responseBody && responseBody.error && responseBody.error.message) {
+              errorMessage = responseBody.error.message;
+            }
+          } catch (e) {
+            // 忽略解析错误
+          }
+          
+          return {
+            success: false,
+            error: errorMessage,
+            statusCode: response.statusCode
+          };
+        }
+      } catch (requestError) {
+        return {
+          success: false,
+          error: requestError.message
+        };
+      }
+    } catch (error) {
+      logger.error(`❌ Account health test failed for ${accountId}:`, error);
+      return {
+        success: false,
+        error: error.message
       };
     }
   }
