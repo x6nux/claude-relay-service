@@ -268,7 +268,7 @@ class ClaudeRelayService {
           } else if (isTokenRevoked) {
             logger.warn(`🔐 OAuth token revoked for account ${accountId}`);
             // 标记账号为不活跃
-            await claudeAccountService.markAccountInactive(accountId, 'OAuth token revoked');
+            await claudeAccountService.markAccountOAuthRevoked(accountId, 'OAuth token revoked');
             // 记录失败到熔断器和恢复服务
             await circuitBreakerService.recordFailure(accountId, 'OAuth token revoked');
             await accountRecoveryService.recordAccountFailure(accountId, new Error('OAuth token revoked'));
@@ -990,8 +990,8 @@ class ClaudeRelayService {
                            errorMessage.includes('authentication_error')) {
                     logger.warn(`🔐 OAuth token revoked detected in stream for account ${accountId}`);
                     // 标记账号为不活跃
-                    claudeAccountService.markAccountInactive(accountId, 'OAuth token revoked in stream').catch(err => {
-                      logger.error(`❌ Failed to mark account as inactive: ${err.message}`);
+                    claudeAccountService.markAccountOAuthRevoked(accountId, 'OAuth token revoked in stream').catch(err => {
+                      logger.error(`❌ Failed to mark account as OAuth revoked: ${err.message}`);
                     });
                     // 记录失败到熔断器和恢复服务
                     circuitBreakerService.recordFailure(accountId, 'OAuth token revoked').catch(() => {});

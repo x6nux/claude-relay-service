@@ -797,9 +797,9 @@ router.post('/claude-accounts/:accountId/health-check', authenticateAdmin, async
       isHealthy = false;
       error = checkError.message;
       
-      // 如果是OAuth token revoked错误，标记账户为不活跃
+      // 如果是OAuth token revoked错误，标记账户为OAuth被撤销
       if (error.includes('OAuth token revoked') || error.includes('authentication_error')) {
-        await claudeAccountService.markAccountInactive(accountId, error);
+        await claudeAccountService.markAccountOAuthRevoked(accountId, error);
       }
     }
     

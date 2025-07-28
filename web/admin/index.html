@@ -1096,6 +1096,11 @@
                                                     <i class="fas fa-ban mr-1"></i>
                                                     已封禁
                                                 </span>
+                                                <span v-else-if="account.status === 'oauth_revoked'" 
+                                                      class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-800">
+                                                    <i class="fas fa-unlink mr-1"></i>
+                                                    OAuth已撤销
+                                                </span>
                                                 <span v-if="account.rateLimitStatus && account.rateLimitStatus.isRateLimited" 
                                                       class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-800">
                                                     <i class="fas fa-exclamation-triangle mr-1"></i>
@@ -2390,7 +2395,7 @@
                                         :key="account.id" 
                                         :value="account.id"
                                     >
-                                        {{ account.name }} ({{ account.status === 'active' ? '正常' : account.status === 'banned' ? '已封禁' : '异常' }})
+                                        {{ account.name }} ({{ account.status === 'active' ? '正常' : account.status === 'banned' ? '已封禁' : account.status === 'oauth_revoked' ? 'OAuth已撤销' : '异常' }})
                                     </option>
                                 </select>
                             </div>
@@ -2407,7 +2412,7 @@
                                         :key="account.id" 
                                         :value="account.id"
                                     >
-                                        {{ account.name }} ({{ account.status === 'active' ? '正常' : account.status === 'banned' ? '已封禁' : '异常' }})
+                                        {{ account.name }} ({{ account.status === 'active' ? '正常' : account.status === 'banned' ? '已封禁' : account.status === 'oauth_revoked' ? 'OAuth已撤销' : '异常' }})
                                     </option>
                                 </select>
                             </div>
@@ -2705,7 +2710,7 @@
                                         :key="account.id" 
                                         :value="account.id"
                                     >
-                                        {{ account.name }} ({{ account.status === 'active' ? '正常' : account.status === 'banned' ? '已封禁' : '异常' }})
+                                        {{ account.name }} ({{ account.status === 'active' ? '正常' : account.status === 'banned' ? '已封禁' : account.status === 'oauth_revoked' ? 'OAuth已撤销' : '异常' }})
                                     </option>
                                 </select>
                             </div>
@@ -2722,7 +2727,7 @@
                                         :key="account.id" 
                                         :value="account.id"
                                     >
-                                        {{ account.name }} ({{ account.status === 'active' ? '正常' : account.status === 'banned' ? '已封禁' : '异常' }})
+                                        {{ account.name }} ({{ account.status === 'active' ? '正常' : account.status === 'banned' ? '已封禁' : account.status === 'oauth_revoked' ? 'OAuth已撤销' : '异常' }})
                                     </option>
                                 </select>
                             </div>

@@ -881,6 +881,47 @@ class ClaudeAccountService {
       throw error;
     }
   }
+
+  // 🔐 标记账号为OAuth被撤销
+  async markAccountOAuthRevoked(accountId, reason = 'OAuth token revoked') {
+    try {
+      const accountData = await redis.getClaudeAccount(accountId);
+      if (!accountData || Object.keys(accountData).length === 0) {
+        throw new Error('Account not found');
+      }
+
+      // 设置账号为OAuth被撤销状态
+      accountData.isActive = 'false';
+      accountData.status = 'oauth_revoked';
+      accountData.errorMessage = reason;
+      accountData.oauthRevokedAt = new Date().toISOString();
+      
+      // 清除敏感的OAuth数据
+      accountData.accessToken = '';
+      accountData.refreshToken = '';
+      accountData.claudeAiOauth = '';
+      
+      await redis.setClaudeAccount(accountId, accountData);
+
+      // 删除所有相关的会话映射
+      const client = redis.getClient();
+      const sessionKeys = await client.keys('session_account_mapping:*');
+      
+      for (const key of sessionKeys) {
+        const mappedAccountId = await client.get(key);
+        if (mappedAccountId === accountId) {
+          await client.del(key);
+        }
+      }
+
+      logger.warn(`🔐 Account OAuth revoked: ${accountData.name} (${accountId}) - Reason: ${reason}`);
+      
+      return { success: true };
+    } catch (error) {
+      logger.error(`❌ Failed to mark account as OAuth revoked: ${accountId}`, error);
+      throw error;
+    }
+  }
 }
 
 module.exports = new ClaudeAccountService();
