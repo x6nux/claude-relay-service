@@ -1382,6 +1382,90 @@ class RedisClient {
       return [];
     }
   }
+  
+  // 🔗 API Key 共享池关联管理
+  // 设置API Key关联的共享池
+  async setApiKeySharedPools(apiKeyId, poolIds) {
+    try {
+      const key = `api_key_pools:${apiKeyId}`;
+      
+      // 删除旧的关联
+      await this.client.del(key);
+      
+      // 如果有新的池ID，添加到集合中
+      if (poolIds && poolIds.length > 0) {
+        await this.client.sadd(key, ...poolIds);
+      }
+      
+      logger.debug(`🔗 Updated shared pools for API key ${apiKeyId}: ${poolIds.join(', ')}`);
+      return true;
+    } catch (error) {
+      logger.error(`❌ Failed to set API key shared pools:`, error);
+      throw error;
+    }
+  }
+  
+  // 获取API Key关联的共享池
+  async getApiKeySharedPools(apiKeyId) {
+    try {
+      const key = `api_key_pools:${apiKeyId}`;
+      const poolIds = await this.client.smembers(key);
+      return poolIds || [];
+    } catch (error) {
+      logger.error(`❌ Failed to get API key shared pools:`, error);
+      return [];
+    }
+  }
+  
+  // 添加共享池到API Key
+  async addSharedPoolToApiKey(apiKeyId, poolId) {
+    try {
+      const key = `api_key_pools:${apiKeyId}`;
+      await this.client.sadd(key, poolId);
+      logger.debug(`🔗 Added pool ${poolId} to API key ${apiKeyId}`);
+      return true;
+    } catch (error) {
+      logger.error(`❌ Failed to add shared pool to API key:`, error);
+      throw error;
+    }
+  }
+  
+  // 从API Key移除共享池
+  async removeSharedPoolFromApiKey(apiKeyId, poolId) {
+    try {
+      const key = `api_key_pools:${apiKeyId}`;
+      await this.client.srem(key, poolId);
+      logger.debug(`🔗 Removed pool ${poolId} from API key ${apiKeyId}`);
+      return true;
+    } catch (error) {
+      logger.error(`❌ Failed to remove shared pool from API key:`, error);
+      throw error;
+    }
+  }
+  
+  // 获取使用特定共享池的所有API Keys
+  async getApiKeysUsingPool(poolId) {
+    try {
+      // 扫描所有api_key_pools:*键
+      const pattern = 'api_key_pools:*';
+      const keys = await this.client.keys(pattern);
+      
+      const apiKeyIds = [];
+      for (const key of keys) {
+        const isMember = await this.client.sismember(key, poolId);
+        if (isMember) {
+          // 从key中提取API Key ID
+          const apiKeyId = key.replace('api_key_pools:', '');
+          apiKeyIds.push(apiKeyId);
+        }
+      }
+      
+      return apiKeyIds;
+    } catch (error) {
+      logger.error(`❌ Failed to get API keys using pool ${poolId}:`, error);
+      return [];
+    }
+  }
 }
 
 const redisClient = new RedisClient();

@@ -635,9 +635,17 @@
                                                                 <i class="fas fa-link mr-1"></i>
                                                                 绑定: {{ getBoundAccountName(key.claudeAccountId) }}
                                                             </span>
+                                                            <span v-else-if="key.sharedPools && key.sharedPools.length > 0">
+                                                                <i class="fas fa-share-alt mr-1"></i>
+                                                                共享池: 
+                                                                <span v-for="(pool, index) in key.sharedPools" :key="pool.id" class="inline-flex items-center">
+                                                                    <span class="text-blue-600">{{ pool.name }}</span>
+                                                                    <span v-if="index < key.sharedPools.length - 1" class="mx-1">•</span>
+                                                                </span>
+                                                            </span>
                                                             <span v-else>
                                                                 <i class="fas fa-share-alt mr-1"></i>
-                                                                使用共享池
+                                                                使用默认共享池
                                                             </span>
                                                         </div>
                                                     </div>
@@ -2604,6 +2612,52 @@
                         </div>
                     </div>
                     
+                    <!-- 共享池选择 -->
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-3">共享池选择 (可选)</label>
+                        <div class="space-y-2">
+                            <div class="flex items-start gap-2">
+                                <input 
+                                    type="checkbox" 
+                                    id="useAllPools" 
+                                    v-model="apiKeyForm.useAllPools"
+                                    @change="onUseAllPoolsChange"
+                                    class="mt-1"
+                                >
+                                <label for="useAllPools" class="flex-1">
+                                    <span class="text-sm font-medium text-gray-700">使用所有可用的共享池</span>
+                                    <p class="text-xs text-gray-500 mt-1">如果选中，API Key 将可以使用所有激活的共享池中的账户</p>
+                                </label>
+                            </div>
+                            
+                            <div v-if="!apiKeyForm.useAllPools" class="mt-3">
+                                <p class="text-sm text-gray-600 mb-2">选择特定的共享池：</p>
+                                <div class="space-y-2 max-h-40 overflow-y-auto custom-scrollbar border border-gray-200 rounded-lg p-3">
+                                    <label 
+                                        v-for="pool in sharedPools.filter(p => p.isActive)" 
+                                        :key="pool.id"
+                                        class="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-2 rounded"
+                                    >
+                                        <input 
+                                            type="checkbox" 
+                                            :value="pool.id"
+                                            v-model="apiKeyForm.selectedPoolIds"
+                                            class="rounded text-blue-600"
+                                        >
+                                        <span class="text-sm text-gray-700">{{ pool.poolName }}</span>
+                                        <span class="text-xs text-gray-500 ml-auto">优先级: {{ pool.priority }}</span>
+                                    </label>
+                                    <div v-if="sharedPools.filter(p => p.isActive).length === 0" class="text-sm text-gray-500 text-center py-4">
+                                        暂无可用的共享池
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-2">
+                            如果不选择任何共享池，API Key 将使用所有可用的共享池
+                        </p>
+                    </div>
+                    
                     <div class="flex gap-3 pt-4">
                         <button 
                             type="button" 
@@ -2917,6 +2971,52 @@
                                 </div>
                             </div>
                         </div>
+                    </div>
+                    
+                    <!-- 共享池选择 -->
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-3">共享池选择 (可选)</label>
+                        <div class="space-y-2">
+                            <div class="flex items-start gap-2">
+                                <input 
+                                    type="checkbox" 
+                                    id="editUseAllPools" 
+                                    v-model="editApiKeyForm.useAllPools"
+                                    @change="onEditUseAllPoolsChange"
+                                    class="mt-1"
+                                >
+                                <label for="editUseAllPools" class="flex-1">
+                                    <span class="text-sm font-medium text-gray-700">使用所有可用的共享池</span>
+                                    <p class="text-xs text-gray-500 mt-1">如果选中，API Key 将可以使用所有激活的共享池中的账户</p>
+                                </label>
+                            </div>
+                            
+                            <div v-if="!editApiKeyForm.useAllPools" class="mt-3">
+                                <p class="text-sm text-gray-600 mb-2">选择特定的共享池：</p>
+                                <div class="space-y-2 max-h-40 overflow-y-auto custom-scrollbar border border-gray-200 rounded-lg p-3">
+                                    <label 
+                                        v-for="pool in sharedPools.filter(p => p.isActive)" 
+                                        :key="pool.id"
+                                        class="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-2 rounded"
+                                    >
+                                        <input 
+                                            type="checkbox" 
+                                            :value="pool.id"
+                                            v-model="editApiKeyForm.selectedPoolIds"
+                                            class="rounded text-blue-600"
+                                        >
+                                        <span class="text-sm text-gray-700">{{ pool.poolName }}</span>
+                                        <span class="text-xs text-gray-500 ml-auto">优先级: {{ pool.priority }}</span>
+                                    </label>
+                                    <div v-if="sharedPools.filter(p => p.isActive).length === 0" class="text-sm text-gray-500 text-center py-4">
+                                        暂无可用的共享池
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-2">
+                            如果不选择任何共享池，API Key 将使用所有可用的共享池
+                        </p>
                     </div>
                     
                     <div class="flex gap-3 pt-4">

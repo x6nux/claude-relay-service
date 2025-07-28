@@ -325,7 +325,8 @@ router.post('/api-keys', authenticateAdmin, async (req, res) => {
       restrictedModels,
       enableClientRestriction,
       allowedClients,
-      dailyCostLimit
+      dailyCostLimit,
+      sharedPoolIds
     } = req.body;
 
     // 输入验证
@@ -391,7 +392,8 @@ router.post('/api-keys', authenticateAdmin, async (req, res) => {
       restrictedModels,
       enableClientRestriction,
       allowedClients,
-      dailyCostLimit
+      dailyCostLimit,
+      sharedPoolIds
     });
 
     logger.success(`🔑 Admin created new API key: ${name}`);
@@ -406,7 +408,7 @@ router.post('/api-keys', authenticateAdmin, async (req, res) => {
 router.put('/api-keys/:keyId', authenticateAdmin, async (req, res) => {
   try {
     const { keyId } = req.params;
-    const { tokenLimit, concurrencyLimit, rateLimitWindow, rateLimitRequests, claudeAccountId, geminiAccountId, permissions, enableModelRestriction, restrictedModels, enableClientRestriction, allowedClients, expiresAt, dailyCostLimit } = req.body;
+    const { tokenLimit, concurrencyLimit, rateLimitWindow, rateLimitRequests, claudeAccountId, geminiAccountId, permissions, enableModelRestriction, restrictedModels, enableClientRestriction, allowedClients, expiresAt, dailyCostLimit, sharedPoolIds } = req.body;
 
     // 只允许更新指定字段
     const updates = {};
@@ -509,6 +511,14 @@ router.put('/api-keys/:keyId', authenticateAdmin, async (req, res) => {
         return res.status(400).json({ error: 'Daily cost limit must be a non-negative number' });
       }
       updates.dailyCostLimit = costLimit;
+    }
+
+    // 处理共享池关联
+    if (sharedPoolIds !== undefined) {
+      if (!Array.isArray(sharedPoolIds)) {
+        return res.status(400).json({ error: 'Shared pool IDs must be an array' });
+      }
+      updates.sharedPoolIds = sharedPoolIds;
     }
 
     await apiKeyService.updateApiKey(keyId, updates);

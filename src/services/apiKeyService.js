@@ -27,7 +27,8 @@ class ApiKeyService {
       restrictedModels = [],
       enableClientRestriction = false,
       allowedClients = [],
-      dailyCostLimit = 0
+      dailyCostLimit = 0,
+      sharedPoolIds = []
     } = options;
 
     // 生成简单的API Key (64字符十六进制)
@@ -62,6 +63,11 @@ class ApiKeyService {
     // 保存API Key数据并建立哈希映射
     await redis.setApiKey(keyId, keyData, hashedKey);
     
+    // 保存共享池关联
+    if (sharedPoolIds && sharedPoolIds.length > 0) {
+      await redis.setApiKeySharedPools(keyId, sharedPoolIds);
+    }
+    
     logger.success(`🔑 Generated new API key: ${name} (${keyId})`);
     
     return {
@@ -84,7 +90,8 @@ class ApiKeyService {
       dailyCostLimit: parseFloat(keyData.dailyCostLimit || 0),
       createdAt: keyData.createdAt,
       expiresAt: keyData.expiresAt,
-      createdBy: keyData.createdBy
+      createdBy: keyData.createdBy,
+      sharedPoolIds: sharedPoolIds || []
     };
   }
 
@@ -204,6 +211,7 @@ class ApiKeyService {
         }
         
         // 获取关联的共享池
+        key.sharedPoolIds = await redis.getApiKeySharedPools(key.id);
         try {
           key.sharedPools = await sharedPoolService.getApiKeyPools(key.id);
         } catch (e) {
@@ -231,6 +239,11 @@ class ApiKeyService {
       // 允许更新的字段
       const allowedUpdates = ['name', 'description', 'tokenLimit', 'concurrencyLimit', 'rateLimitWindow', 'rateLimitRequests', 'isActive', 'claudeAccountId', 'geminiAccountId', 'permissions', 'expiresAt', 'enableModelRestriction', 'restrictedModels', 'enableClientRestriction', 'allowedClients', 'dailyCostLimit'];
       const updatedData = { ...keyData };
+      
+      // 处理共享池更新
+      if (updates.sharedPoolIds !== undefined) {
+        await redis.setApiKeySharedPools(keyId, updates.sharedPoolIds || []);
+      }
 
       for (const [field, value] of Object.entries(updates)) {
         if (allowedUpdates.includes(field)) {
@@ -268,6 +281,9 @@ class ApiKeyService {
       if (result === 0) {
         throw new Error('API key not found');
       }
+      
+      // 清理共享池关联
+      await redis.setApiKeySharedPools(keyId, []);
       
       logger.success(`🗑️ Deleted API key: ${keyId}`);
       

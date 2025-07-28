@@ -137,7 +137,9 @@ const app = createApp({
                 expireDuration: '', // 过期时长选择
                 customExpireDate: '', // 自定义过期日期
                 expiresAt: null, // 实际的过期时间戳
-                dailyCostLimit: '' // 每日费用限制
+                dailyCostLimit: '', // 每日费用限制
+                useAllPools: true, // 是否使用所有共享池
+                selectedPoolIds: [] // 选择的共享池ID
             },
             apiKeyModelStats: {}, // 存储每个key的模型统计数据
             expandedApiKeys: {}, // 跟踪展开的API Keys
@@ -197,7 +199,9 @@ const app = createApp({
                 modelInput: '',
                 enableClientRestriction: false,
                 allowedClients: [],
-                dailyCostLimit: ''
+                dailyCostLimit: '',
+                useAllPools: true, // 是否使用所有共享池
+                selectedPoolIds: [] // 选择的共享池ID
             },
             
             // 支持的客户端列表
@@ -2190,7 +2194,8 @@ const app = createApp({
                         enableClientRestriction: this.apiKeyForm.enableClientRestriction,
                         allowedClients: this.apiKeyForm.allowedClients,
                         expiresAt: this.apiKeyForm.expiresAt,
-                        dailyCostLimit: this.apiKeyForm.dailyCostLimit && this.apiKeyForm.dailyCostLimit.toString().trim() ? parseFloat(this.apiKeyForm.dailyCostLimit) : 0
+                        dailyCostLimit: this.apiKeyForm.dailyCostLimit && this.apiKeyForm.dailyCostLimit.toString().trim() ? parseFloat(this.apiKeyForm.dailyCostLimit) : 0,
+                        sharedPoolIds: !this.apiKeyForm.useAllPools ? this.apiKeyForm.selectedPoolIds : []
                     })
                 });
                 
@@ -2229,7 +2234,9 @@ const app = createApp({
                         expireDuration: '',
                         customExpireDate: '',
                         expiresAt: null,
-                        dailyCostLimit: ''
+                        dailyCostLimit: '',
+                        useAllPools: true,
+                        selectedPoolIds: []
                     };
                     
                     // 重新加载API Keys列表
@@ -2397,7 +2404,9 @@ const app = createApp({
                 modelInput: '',
                 enableClientRestriction: key.enableClientRestriction || false,
                 allowedClients: key.allowedClients ? [...key.allowedClients] : [],
-                dailyCostLimit: key.dailyCostLimit || ''
+                dailyCostLimit: key.dailyCostLimit || '',
+                useAllPools: !key.sharedPoolIds || key.sharedPoolIds.length === 0,
+                selectedPoolIds: key.sharedPoolIds ? [...key.sharedPoolIds] : []
             };
             this.showEditApiKeyModal = true;
         },
@@ -2440,7 +2449,8 @@ const app = createApp({
                         restrictedModels: this.editApiKeyForm.restrictedModels,
                         enableClientRestriction: this.editApiKeyForm.enableClientRestriction,
                         allowedClients: this.editApiKeyForm.allowedClients,
-                        dailyCostLimit: this.editApiKeyForm.dailyCostLimit && this.editApiKeyForm.dailyCostLimit.toString().trim() !== '' ? parseFloat(this.editApiKeyForm.dailyCostLimit) : 0
+                        dailyCostLimit: this.editApiKeyForm.dailyCostLimit && this.editApiKeyForm.dailyCostLimit.toString().trim() !== '' ? parseFloat(this.editApiKeyForm.dailyCostLimit) : 0,
+                        sharedPoolIds: !this.editApiKeyForm.useAllPools ? this.editApiKeyForm.selectedPoolIds : []
                     })
                 });
                 
@@ -2637,6 +2647,20 @@ const app = createApp({
             const total = stats.reduce((sum, stat) => sum + (stat.allTokens || 0), 0);
             if (total === 0) return 0;
             return ((value / total) * 100).toFixed(1);
+        },
+        
+        // 处理共享池选择变化
+        onUseAllPoolsChange() {
+            if (this.apiKeyForm.useAllPools) {
+                this.apiKeyForm.selectedPoolIds = [];
+            }
+        },
+        
+        // 处理编辑时的共享池选择变化
+        onEditUseAllPoolsChange() {
+            if (this.editApiKeyForm.useAllPools) {
+                this.editApiKeyForm.selectedPoolIds = [];
+            }
         },
 
         // 加载仪表盘模型统计

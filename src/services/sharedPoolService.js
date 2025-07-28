@@ -115,6 +115,16 @@ class SharedPoolService {
     }
   }
 
+  // 🏊 获取默认共享池
+  async getDefaultPool() {
+    try {
+      return await this.getPool(this.DEFAULT_POOL_ID);
+    } catch (error) {
+      logger.error('❌ Failed to get default pool:', error);
+      return null;
+    }
+  }
+
   // 🏊 获取或创建默认共享池
   async getOrCreateDefaultPool() {
     try {
@@ -377,17 +387,39 @@ class SharedPoolService {
   // 🎯 从API Key的所有池中选择账户（考虑优先级和策略）
   async selectAccountFromPools(apiKeyId, sessionHash = null, excludeAccountIds = null) {
     try {
-      // 获取API Key关联的所有池（已按优先级排序）
-      let pools = await this.getApiKeyPools(apiKeyId);
+      // 获取API Key关联的共享池ID
+      const poolIds = await redis.getApiKeySharedPools(apiKeyId);
+      let pools = [];
+      
+      if (poolIds && poolIds.length > 0) {
+        // 如果API Key指定了特定的共享池，只使用这些池
+        logger.info(`📋 API Key ${apiKeyId} is associated with ${poolIds.length} specific pools`);
+        for (const poolId of poolIds) {
+          const pool = await this.getPool(poolId);
+          if (pool && pool.isActive) {
+            pools.push(pool);
+          }
+        }
+        // 按优先级排序
+        pools.sort((a, b) => b.priority - a.priority);
+      } else {
+        // 如果没有指定共享池，使用默认池
+        logger.info(`📋 API Key ${apiKeyId} not associated with specific pools, using default pool`);
+        const defaultPool = await this.getDefaultPool();
+        if (defaultPool && defaultPool.isActive) {
+          pools = [defaultPool];
+        } else {
+          // 如果没有默认池，则使用所有激活的池作为后备方案
+          logger.warn('⚠️ No default pool found, falling back to all active pools');
+          const allPools = await this.getAllPools();
+          pools = allPools.filter(pool => pool.isActive);
+          // 按优先级排序
+          pools.sort((a, b) => b.priority - a.priority);
+        }
+      }
       
       if (pools.length === 0) {
-        // 如果没有关联到任何共享池，使用默认共享池
-        logger.info(`📋 API Key ${apiKeyId} not associated with any pools, using default pool`);
-        const defaultPool = await this.getOrCreateDefaultPool();
-        if (!defaultPool) {
-          throw new Error('Failed to get or create default shared pool');
-        }
-        pools = [defaultPool];
+        throw new Error('No active shared pools available');
       }
 
       // 按优先级尝试每个池
