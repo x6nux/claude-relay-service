@@ -2171,7 +2171,7 @@ router.get('/check-updates', authenticateAdmin, async (req, res) => {
     }
 
     // 请求 GitHub API
-    const githubRepo = 'wei-shaw/claude-relay-service';
+    const githubRepo = 'x6nux/claude-relay-service';
     const response = await axios.get(
       `https://api.github.com/repos/${githubRepo}/releases/latest`,
       {

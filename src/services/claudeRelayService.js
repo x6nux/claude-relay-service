@@ -206,6 +206,7 @@ class ClaudeRelayService {
           // 检查其他错误类型
           let isRateLimited = false;
           let isTokenRevoked = false;
+          let isOrganizationDisabled = false;
           
           try {
             const responseBody = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
@@ -213,6 +214,8 @@ class ClaudeRelayService {
             // 检查是否是限流错误
             if (responseBody && responseBody.error && responseBody.error.message) {
               const errorMessage = responseBody.error.message.toLowerCase();
+              const errorType = responseBody.error.type;
+              
               if (errorMessage.includes('exceed your account\'s rate limit')) {
                 isRateLimited = true;
               }
@@ -221,6 +224,11 @@ class ClaudeRelayService {
                        errorMessage.includes('please run /login') ||
                        errorMessage.includes('authentication_error')) {
                 isTokenRevoked = true;
+              }
+              // 检查是否是组织被禁用
+              else if (errorType === 'invalid_request_error' && 
+                       errorMessage.includes('this organization has been disabled')) {
+                isOrganizationDisabled = true;
               }
             }
           } catch (e) {
@@ -233,11 +241,31 @@ class ClaudeRelayService {
                          bodyLower.includes('please run /login') ||
                          bodyLower.includes('authentication_error')) {
                 isTokenRevoked = true;
+              } else if (bodyLower.includes('this organization has been disabled')) {
+                isOrganizationDisabled = true;
               }
             }
           }
           
-          if (isTokenRevoked) {
+          if (isOrganizationDisabled) {
+            logger.error(`🚫 Account ${accountId} has been banned (organization disabled)`);
+            // 标记账号为被封禁
+            await claudeAccountService.updateAccount(accountId, {
+              status: 'banned',
+              errorMessage: 'Organization has been disabled',
+              isActive: false
+            });
+            // 记录失败到熔断器和恢复服务
+            await circuitBreakerService.recordFailure(accountId, 'Organization disabled');
+            await accountRecoveryService.recordAccountFailure(accountId, new Error('Organization disabled'));
+            lastResponse = response;
+            
+            // 如果还有重试次数，切换账号继续重试
+            if (retryCount < maxRetries - 1) {
+              logger.info(`🔄 Account banned, switching to a different account...`);
+              continue;
+            }
+          } else if (isTokenRevoked) {
             logger.warn(`🔐 OAuth token revoked for account ${accountId}`);
             // 标记账号为不活跃
             await claudeAccountService.markAccountInactive(accountId, 'OAuth token revoked');
@@ -949,6 +977,7 @@ class ClaudeRelayService {
                 // 检查是否有错误
                 if (data.type === 'error' && data.error && data.error.message) {
                   const errorMessage = data.error.message.toLowerCase();
+                  const errorType = data.error.type;
                   
                   // 检查是否有限流错误
                   if (errorMessage.includes('exceed your account\'s rate limit')) {
@@ -967,6 +996,22 @@ class ClaudeRelayService {
                     // 记录失败到熔断器和恢复服务
                     circuitBreakerService.recordFailure(accountId, 'OAuth token revoked').catch(() => {});
                     accountRecoveryService.recordAccountFailure(accountId, new Error('OAuth token revoked')).catch(() => {});
+                  }
+                  // 检查是否是组织被禁用
+                  else if (errorType === 'invalid_request_error' && 
+                           errorMessage.includes('this organization has been disabled')) {
+                    logger.error(`🚫 Account ${accountId} has been banned (organization disabled) - detected in stream`);
+                    // 标记账号为被封禁
+                    claudeAccountService.updateAccount(accountId, {
+                      status: 'banned',
+                      errorMessage: 'Organization has been disabled',
+                      isActive: false
+                    }).catch(err => {
+                      logger.error(`❌ Failed to mark account as banned: ${err.message}`);
+                    });
+                    // 记录失败到熔断器和恢复服务
+                    circuitBreakerService.recordFailure(accountId, 'Organization disabled').catch(() => {});
+                    accountRecoveryService.recordAccountFailure(accountId, new Error('Organization disabled')).catch(() => {});
                   }
                 }
                 
@@ -1360,19 +1405,39 @@ class ClaudeRelayService {
         } else {
           // 解析错误信息
           let errorMessage = `HTTP ${response.statusCode}`;
+          let isOrganizationDisabled = false;
+          
           try {
             const responseBody = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
             if (responseBody && responseBody.error && responseBody.error.message) {
               errorMessage = responseBody.error.message;
+              
+              // 检查是否是组织被禁用的错误
+              if (responseBody.error.type === 'invalid_request_error' && 
+                  errorMessage.includes('This organization has been disabled')) {
+                isOrganizationDisabled = true;
+                errorMessage = '账号已被封禁 (Organization disabled)';
+              }
             }
           } catch (e) {
             // 忽略解析错误
           }
           
+          // 如果是账号被封禁，更新账户状态
+          if (isOrganizationDisabled) {
+            logger.error(`🚫 Account ${accountId} has been banned (organization disabled)`);
+            await claudeAccountService.updateAccount(accountId, {
+              status: 'banned',
+              errorMessage: 'Organization has been disabled',
+              isActive: false
+            });
+          }
+          
           return {
             success: false,
             error: errorMessage,
-            statusCode: response.statusCode
+            statusCode: response.statusCode,
+            isBanned: isOrganizationDisabled
           };
         }
       } catch (requestError) {

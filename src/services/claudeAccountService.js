@@ -472,11 +472,12 @@ class ClaudeAccountService {
       // 如果API Key绑定了专属账户，优先使用
       if (apiKeyData.claudeAccountId && (!excludeAccountIds || !excludeAccountIds.has(apiKeyData.claudeAccountId))) {
         const boundAccount = await redis.getClaudeAccount(apiKeyData.claudeAccountId);
-        if (boundAccount && boundAccount.isActive === 'true' && boundAccount.status !== 'error') {
+        if (boundAccount && boundAccount.isActive === 'true' && boundAccount.status !== 'error' && boundAccount.status !== 'banned') {
           logger.info(`🎯 Using bound dedicated account: ${boundAccount.name} (${apiKeyData.claudeAccountId}) for API key ${apiKeyData.name}`);
           return apiKeyData.claudeAccountId;
         } else {
-          logger.warn(`⚠️ Bound account ${apiKeyData.claudeAccountId} is not available, falling back to shared pool`);
+          const status = boundAccount ? boundAccount.status : 'not found';
+          logger.warn(`⚠️ Bound account ${apiKeyData.claudeAccountId} is not available (status: ${status}), falling back to shared pool`);
         }
       }
 
@@ -486,6 +487,7 @@ class ClaudeAccountService {
       let sharedAccounts = accounts.filter(account => 
         account.isActive === 'true' && 
         account.status !== 'error' &&
+        account.status !== 'banned' &&
         (account.accountType === 'shared' || !account.accountType) // 兼容旧数据
       );
 
