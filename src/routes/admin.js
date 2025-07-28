@@ -2521,17 +2521,8 @@ router.get('/shared-pools/:poolId/accounts', authenticateAdmin, async (req, res)
     const sharedPoolService = require('../services/sharedPoolService');
     const accountIds = await sharedPoolService.getPoolAccounts(poolId);
     
-    // 获取账户详情
-    const accounts = [];
-    for (const accountId of accountIds) {
-      const account = await claudeAccountService.getAllAccounts();
-      const foundAccount = account.find(acc => acc.id === accountId);
-      if (foundAccount) {
-        accounts.push(foundAccount);
-      }
-    }
-    
-    res.json({ success: true, data: accounts });
+    // 直接返回账户ID数组，前端期望的格式
+    res.json(accountIds);
   } catch (error) {
     logger.error('❌ Failed to get pool accounts:', error);
     res.status(500).json({ error: 'Failed to get pool accounts', message: error.message });
