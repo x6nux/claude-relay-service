@@ -1224,10 +1224,13 @@ class RedisClient {
     const dailyKey = `pool_usage:account:daily:${poolId}:${accountId}:${today}`;
     const monthlyKey = `pool_usage:account:monthly:${poolId}:${accountId}:${currentMonth}`;
 
-    const [daily, monthly] = await Promise.all([
+    const [daily, monthly, accountData] = await Promise.all([
       this.client.hgetall(dailyKey),
-      this.client.hgetall(monthlyKey)
+      this.client.hgetall(monthlyKey),
+      this.client.hgetall(`claude_account:${accountId}`)
     ]);
+
+    const accountName = accountData ? accountData.name : 'Unknown';
 
     const handleData = (data) => {
       const tokens = parseInt(data.tokens) || 0;
@@ -1254,6 +1257,7 @@ class RedisClient {
     return {
       poolId: poolId,
       accountId: accountId,
+      accountName: accountName,
       daily: handleData(daily),
       monthly: handleData(monthly)
     };
@@ -1271,12 +1275,17 @@ class RedisClient {
       for (const key of keys) {
         // 从key中提取accountId
         const parts = key.split(':');
-        const accountId = parts[5]; // pool_usage:account:daily:{poolId}:{accountId}:{date}
+        const accountId = parts[4]; // pool_usage:account:daily:{poolId}:{accountId}:{date}
         
         const usage = await this.client.hgetall(key);
         
+        // 获取账户名称
+        const accountData = await this.client.hgetall(`claude_account:${accountId}`);
+        const accountName = accountData ? accountData.name : 'Unknown';
+        
         accountsUsage.push({
           accountId,
+          accountName,
           date: targetDate,
           tokens: parseInt(usage.tokens || 0),
           inputTokens: parseInt(usage.inputTokens || 0),
@@ -1346,42 +1355,6 @@ class RedisClient {
     };
   }
 
-  // 📊 获取共享池中每个账户的使用统计
-  async getPoolAccountsUsage(poolId, date = null) {
-    try {
-      const targetDate = date || getDateStringInTimezone();
-      const pattern = `pool_usage:account:daily:${poolId}:*:${targetDate}`;
-      const keys = await this.client.keys(pattern);
-      
-      const accountsUsage = [];
-      
-      for (const key of keys) {
-        // 从key中提取accountId
-        const parts = key.split(':');
-        const accountId = parts[5]; // pool_usage:account:daily:{poolId}:{accountId}:{date}
-        
-        const usage = await this.client.hgetall(key);
-        
-        accountsUsage.push({
-          accountId,
-          date: targetDate,
-          tokens: parseInt(usage.tokens || 0),
-          inputTokens: parseInt(usage.inputTokens || 0),
-          outputTokens: parseInt(usage.outputTokens || 0),
-          cacheCreateTokens: parseInt(usage.cacheCreateTokens || 0),
-          cacheReadTokens: parseInt(usage.cacheReadTokens || 0),
-          allTokens: parseInt(usage.allTokens || 0),
-          requests: parseInt(usage.requests || 0)
-        });
-      }
-      
-      // 按使用量排序
-      return accountsUsage.sort((a, b) => b.allTokens - a.allTokens);
-    } catch (error) {
-      logger.error(`❌ Failed to get pool accounts usage for pool ${poolId}:`, error);
-      return [];
-    }
-  }
   
   // 🔗 API Key 共享池关联管理
   // 设置API Key关联的共享池
