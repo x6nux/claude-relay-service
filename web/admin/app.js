@@ -2442,47 +2442,6 @@ const app = createApp({
             }
         },
         
-        // 手动健康检查
-        async checkAccountHealth(account) {
-            // 设置检查中状态 - Vue 3 方式
-            account.healthChecking = true;
-            
-            try {
-                // 根据平台选择端点
-                const endpoint = account.platform === 'gemini' 
-                    ? `/admin/gemini-accounts/${account.id}/health-check`
-                    : `/admin/claude-accounts/${account.id}/health-check`;
-                
-                const response = await fetch(endpoint, {
-                    method: 'POST',
-                    headers: { 'Authorization': 'Bearer ' + this.authToken }
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    const healthResult = data.data;
-                    const platformName = account.platform === 'gemini' ? 'Gemini' : 'Claude';
-                    
-                    if (healthResult.isHealthy) {
-                        this.showToast(`${platformName} 账户 ${account.name} 健康状态良好`, 'success', '健康检查');
-                    } else {
-                        this.showToast(`${platformName} 账户 ${account.name} 健康检查失败: ${healthResult.error}`, 'error', '健康检查');
-                    }
-                    
-                    // 刷新账户列表以更新状态
-                    await this.loadAccounts();
-                } else {
-                    this.showToast(data.message || '健康检查失败', 'error');
-                }
-            } catch (error) {
-                console.error('Health check error:', error);
-                this.showToast('健康检查失败，请检查网络连接', 'error', '网络错误');
-            } finally {
-                // 移除检查中状态 - Vue 3 方式
-                delete account.healthChecking;
-            }
-        },
         
         // 刷新账户 Token
         async refreshAccountToken(accountId) {

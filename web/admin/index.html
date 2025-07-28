@@ -1079,7 +1079,7 @@
                                                 <span v-if="account.status === 'error'" 
                                                       class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800">
                                                     <i class="fas fa-exclamation-circle mr-1"></i>
-                                                    {{ account.errorMessage || '错误' }}
+                                                    账号异常
                                                 </span>
                                                 <span v-else-if="account.status === 'created'" 
                                                       class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800">
@@ -1138,14 +1138,6 @@
                                             {{ account.lastUsedAt ? new Date(account.lastUsedAt).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '从未使用' }}
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm space-x-2">
-                                            <button 
-                                                @click="checkAccountHealth(account)" 
-                                                class="text-green-600 hover:text-green-900 font-medium hover:bg-green-50 px-3 py-1 rounded-lg transition-colors"
-                                                :disabled="account.healthChecking"
-                                            >
-                                                <i :class="[account.healthChecking ? 'fas fa-spinner fa-spin' : 'fas fa-heartbeat', 'mr-1']"></i>
-                                                {{ account.healthChecking ? '检查中' : '健康检查' }}
-                                            </button>
                                             <button 
                                                 @click="openEditAccountModal(account)" 
                                                 class="text-blue-600 hover:text-blue-900 font-medium hover:bg-blue-50 px-3 py-1 rounded-lg transition-colors"
