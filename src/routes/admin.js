@@ -2578,4 +2578,71 @@ router.get('/api-keys/:keyId/pools', authenticateAdmin, async (req, res) => {
   }
 });
 
+// 获取共享池使用统计
+router.get('/shared-pools/:poolId/usage', authenticateAdmin, async (req, res) => {
+  try {
+    const { poolId } = req.params;
+    
+    const sharedPoolService = require('../services/sharedPoolService');
+    const pool = await sharedPoolService.getPool(poolId);
+    
+    if (!pool) {
+      return res.status(404).json({ error: 'Shared pool not found' });
+    }
+    
+    // 获取共享池的使用统计
+    const poolUsage = await redis.getPoolUsageStats(poolId);
+    
+    res.json({ success: true, data: poolUsage });
+  } catch (error) {
+    logger.error('❌ Failed to get pool usage stats:', error);
+    res.status(500).json({ error: 'Failed to get pool usage stats', message: error.message });
+  }
+});
+
+// 获取共享池中每个账户的使用统计
+router.get('/shared-pools/:poolId/usage/accounts', authenticateAdmin, async (req, res) => {
+  try {
+    const { poolId } = req.params;
+    const { date } = req.query; // 可选日期参数，格式：YYYY-MM-DD
+    
+    const sharedPoolService = require('../services/sharedPoolService');
+    const pool = await sharedPoolService.getPool(poolId);
+    
+    if (!pool) {
+      return res.status(404).json({ error: 'Shared pool not found' });
+    }
+    
+    // 获取池中所有账户的使用统计
+    const accountsUsage = await redis.getPoolAccountsUsage(poolId, date);
+    
+    res.json({ success: true, data: accountsUsage });
+  } catch (error) {
+    logger.error('❌ Failed to get pool accounts usage:', error);
+    res.status(500).json({ error: 'Failed to get pool accounts usage', message: error.message });
+  }
+});
+
+// 获取共享池中特定账户的使用统计
+router.get('/shared-pools/:poolId/usage/accounts/:accountId', authenticateAdmin, async (req, res) => {
+  try {
+    const { poolId, accountId } = req.params;
+    
+    const sharedPoolService = require('../services/sharedPoolService');
+    const pool = await sharedPoolService.getPool(poolId);
+    
+    if (!pool) {
+      return res.status(404).json({ error: 'Shared pool not found' });
+    }
+    
+    // 获取特定账户在池中的使用统计
+    const accountUsage = await redis.getPoolAccountUsageStats(poolId, accountId);
+    
+    res.json({ success: true, data: accountUsage });
+  } catch (error) {
+    logger.error('❌ Failed to get pool account usage:', error);
+    res.status(500).json({ error: 'Failed to get pool account usage', message: error.message });
+  }
+});
+
 module.exports = router;

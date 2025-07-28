@@ -474,7 +474,11 @@ class ClaudeAccountService {
         const boundAccount = await redis.getClaudeAccount(apiKeyData.claudeAccountId);
         if (boundAccount && boundAccount.isActive === 'true' && boundAccount.status !== 'error' && boundAccount.status !== 'banned') {
           logger.info(`🎯 Using bound dedicated account: ${boundAccount.name} (${apiKeyData.claudeAccountId}) for API key ${apiKeyData.name}`);
-          return apiKeyData.claudeAccountId;
+          // 专属账户不属于任何池，poolId为null
+          return {
+            accountId: apiKeyData.claudeAccountId,
+            poolId: null
+          };
         } else {
           const status = boundAccount ? boundAccount.status : 'not found';
           logger.warn(`⚠️ Bound account ${apiKeyData.claudeAccountId} is not available (status: ${status}), falling back to shared pools`);
@@ -497,7 +501,11 @@ class ClaudeAccountService {
           await redis.setSessionAccountMapping(sessionHash, poolResult.accountId, 3600); // 1小时过期
         }
         
-        return poolResult.accountId;
+        // 返回账户ID和池ID
+        return {
+          accountId: poolResult.accountId,
+          poolId: poolResult.poolId
+        };
       }
 
       // 如果仍然没有找到账户，作为最后的备用方案
@@ -534,7 +542,11 @@ class ClaudeAccountService {
               await redis.deleteSessionAccountMapping(sessionHash);
             } else {
               logger.info(`🎯 Using sticky session shared account: ${mappedAccount.name} (${mappedAccountId}) for session ${sessionHash}`);
-              return mappedAccountId;
+              // 会话映射的账户不属于任何池
+              return {
+                accountId: mappedAccountId,
+                poolId: null
+              };
             }
           } else {
             logger.warn(`⚠️ Mapped shared account ${mappedAccountId} is no longer available, selecting new account`);
@@ -592,7 +604,11 @@ class ClaudeAccountService {
       }
 
       logger.info(`🎯 Selected shared account: ${candidateAccounts[0].name} (${selectedAccountId}) for API key ${apiKeyData.name}`);
-      return selectedAccountId;
+      // 备用方案选择的账户不属于任何池
+      return {
+        accountId: selectedAccountId,
+        poolId: null
+      };
     } catch (error) {
       logger.error('❌ Failed to select account for API key:', error);
       throw error;

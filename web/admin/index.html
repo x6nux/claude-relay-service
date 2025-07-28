@@ -1315,6 +1315,11 @@
                                         <p v-if="pool.description" class="text-gray-600 mt-1">{{ pool.description }}</p>
                                     </div>
                                     <div class="flex gap-2">
+                                        <button @click="viewPoolUsage(pool)" 
+                                                class="text-green-600 hover:text-green-700 transition-colors"
+                                                title="查看统计">
+                                            <i class="fas fa-chart-bar"></i>
+                                        </button>
                                         <button @click="managePoolAccounts(pool)" 
                                                 class="text-blue-600 hover:text-blue-700 transition-colors"
                                                 title="管理账户">
@@ -4474,6 +4479,200 @@
                 <div class="flex gap-3 mt-6">
                     <button 
                         @click="closeAccountPoolsModal"
+                        class="flex-1 px-6 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition-colors"
+                    >
+                        关闭
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 共享池统计模态框 -->
+        <div v-if="showPoolUsageModal" class="fixed inset-0 modal z-50 flex items-center justify-center p-4">
+            <div class="modal-content w-full max-w-5xl p-8 mx-auto max-h-[90vh] flex flex-col">
+                <div class="flex items-center justify-between mb-6">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center">
+                            <i class="fas fa-chart-bar text-white"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-xl font-bold text-gray-900">共享池使用统计</h3>
+                            <p class="text-sm text-gray-600 mt-1" v-if="currentPoolUsage">{{ currentPoolUsage.poolName }}</p>
+                        </div>
+                    </div>
+                    <button 
+                        @click="closePoolUsageModal"
+                        class="text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+                
+                <!-- 统计加载中 -->
+                <div v-if="poolUsageLoading" class="text-center py-12">
+                    <div class="loading-spinner mx-auto mb-4"></div>
+                    <p class="text-gray-600">加载统计数据中...</p>
+                </div>
+                
+                <!-- 统计内容 -->
+                <div v-else-if="poolUsageData" class="flex-1 overflow-y-auto custom-scrollbar">
+                    <!-- 总体统计卡片 -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                        <div class="bg-gradient-to-r from-blue-50 to-blue-100 rounded-xl p-6">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-blue-600 font-semibold">今日使用</span>
+                                <i class="fas fa-calendar-day text-blue-500"></i>
+                            </div>
+                            <p class="text-3xl font-bold text-blue-800">{{ formatNumber(poolUsageData.daily.allTokens) }}</p>
+                            <p class="text-sm text-blue-600 mt-1">tokens</p>
+                            <p class="text-xs text-blue-500 mt-2">请求数: {{ formatNumber(poolUsageData.daily.requests) }}</p>
+                        </div>
+                        
+                        <div class="bg-gradient-to-r from-green-50 to-green-100 rounded-xl p-6">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-green-600 font-semibold">本月使用</span>
+                                <i class="fas fa-calendar-alt text-green-500"></i>
+                            </div>
+                            <p class="text-3xl font-bold text-green-800">{{ formatNumber(poolUsageData.monthly.allTokens) }}</p>
+                            <p class="text-sm text-green-600 mt-1">tokens</p>
+                            <p class="text-xs text-green-500 mt-2">请求数: {{ formatNumber(poolUsageData.monthly.requests) }}</p>
+                        </div>
+                        
+                        <div class="bg-gradient-to-r from-purple-50 to-purple-100 rounded-xl p-6">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-purple-600 font-semibold">总计使用</span>
+                                <i class="fas fa-chart-line text-purple-500"></i>
+                            </div>
+                            <p class="text-3xl font-bold text-purple-800">{{ formatNumber(poolUsageData.total.allTokens) }}</p>
+                            <p class="text-sm text-purple-600 mt-1">tokens</p>
+                            <p class="text-xs text-purple-500 mt-2">请求数: {{ formatNumber(poolUsageData.total.requests) }}</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Token 类型分布 -->
+                    <div class="bg-white rounded-xl p-6 border border-gray-200 mb-8">
+                        <h4 class="text-lg font-semibold text-gray-900 mb-4">Token 类型分布</h4>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div class="text-center">
+                                <p class="text-sm text-gray-600 mb-1">输入 Tokens</p>
+                                <p class="text-2xl font-bold text-blue-600">{{ formatNumber(poolUsageData.total.inputTokens) }}</p>
+                            </div>
+                            <div class="text-center">
+                                <p class="text-sm text-gray-600 mb-1">输出 Tokens</p>
+                                <p class="text-2xl font-bold text-green-600">{{ formatNumber(poolUsageData.total.outputTokens) }}</p>
+                            </div>
+                            <div class="text-center">
+                                <p class="text-sm text-gray-600 mb-1">缓存创建 Tokens</p>
+                                <p class="text-2xl font-bold text-purple-600">{{ formatNumber(poolUsageData.total.cacheCreateTokens) }}</p>
+                            </div>
+                            <div class="text-center">
+                                <p class="text-sm text-gray-600 mb-1">缓存读取 Tokens</p>
+                                <p class="text-2xl font-bold text-orange-600">{{ formatNumber(poolUsageData.total.cacheReadTokens) }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 账户使用统计标签页 -->
+                    <div class="bg-white rounded-xl border border-gray-200">
+                        <div class="flex items-center justify-between p-4 border-b border-gray-200">
+                            <h4 class="text-lg font-semibold text-gray-900">账户使用详情</h4>
+                            <div class="flex gap-2">
+                                <button 
+                                    @click="poolUsageTab = 'today'"
+                                    :class="['px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+                                             poolUsageTab === 'today' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100']"
+                                >
+                                    今日
+                                </button>
+                                <button 
+                                    @click="poolUsageTab = 'yesterday'"
+                                    :class="['px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+                                             poolUsageTab === 'yesterday' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100']"
+                                >
+                                    昨日
+                                </button>
+                                <button 
+                                    @click="poolUsageTab = 'custom'"
+                                    :class="['px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+                                             poolUsageTab === 'custom' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100']"
+                                >
+                                    自定义
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- 自定义日期选择 -->
+                        <div v-if="poolUsageTab === 'custom'" class="p-4 border-b border-gray-200">
+                            <input 
+                                type="date" 
+                                v-model="poolUsageCustomDate"
+                                @change="loadPoolAccountsUsage"
+                                class="form-input"
+                                :max="new Date().toISOString().split('T')[0]"
+                            >
+                        </div>
+                        
+                        <!-- 账户列表 -->
+                        <div class="p-4">
+                            <div v-if="poolAccountsUsageLoading" class="text-center py-8">
+                                <div class="loading-spinner mx-auto mb-2"></div>
+                                <p class="text-gray-600 text-sm">加载账户统计中...</p>
+                            </div>
+                            
+                            <div v-else-if="poolAccountsUsage.length === 0" class="text-center py-8">
+                                <i class="fas fa-inbox text-4xl text-gray-300 mb-3"></i>
+                                <p class="text-gray-500">暂无使用记录</p>
+                            </div>
+                            
+                            <div v-else class="overflow-x-auto">
+                                <table class="w-full">
+                                    <thead>
+                                        <tr class="text-left text-sm text-gray-600 border-b border-gray-200">
+                                            <th class="pb-3 pr-4">账户</th>
+                                            <th class="pb-3 px-4 text-right">请求数</th>
+                                            <th class="pb-3 px-4 text-right">总 Tokens</th>
+                                            <th class="pb-3 px-4 text-right">输入</th>
+                                            <th class="pb-3 px-4 text-right">输出</th>
+                                            <th class="pb-3 px-4 text-right">缓存创建</th>
+                                            <th class="pb-3 pl-4 text-right">缓存读取</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="usage in poolAccountsUsage" :key="usage.accountId" 
+                                            class="border-b border-gray-100 hover:bg-gray-50">
+                                            <td class="py-3 pr-4">
+                                                <p class="font-medium text-gray-900">{{ getAccountName(usage.accountId) }}</p>
+                                                <p class="text-xs text-gray-500">{{ usage.accountId.slice(0, 8) }}...</p>
+                                            </td>
+                                            <td class="py-3 px-4 text-right text-gray-700">
+                                                {{ formatNumber(usage.requests) }}
+                                            </td>
+                                            <td class="py-3 px-4 text-right font-semibold text-gray-900">
+                                                {{ formatNumber(usage.allTokens) }}
+                                            </td>
+                                            <td class="py-3 px-4 text-right text-blue-600">
+                                                {{ formatNumber(usage.inputTokens) }}
+                                            </td>
+                                            <td class="py-3 px-4 text-right text-green-600">
+                                                {{ formatNumber(usage.outputTokens) }}
+                                            </td>
+                                            <td class="py-3 px-4 text-right text-purple-600">
+                                                {{ formatNumber(usage.cacheCreateTokens) }}
+                                            </td>
+                                            <td class="py-3 pl-4 text-right text-orange-600">
+                                                {{ formatNumber(usage.cacheReadTokens) }}
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="flex gap-3 mt-6">
+                    <button 
+                        @click="closePoolUsageModal"
                         class="flex-1 px-6 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition-colors"
                     >
                         关闭

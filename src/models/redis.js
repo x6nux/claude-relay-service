@@ -1081,6 +1081,307 @@ class RedisClient {
       return 0;
     }
   }
+
+  // 📊 增加共享池使用统计
+  async incrementPoolUsage(poolId, accountId, tokens, inputTokens = 0, outputTokens = 0, cacheCreateTokens = 0, cacheReadTokens = 0, model = 'unknown') {
+    const now = new Date();
+    const today = getDateStringInTimezone(now);
+    const tzDate = getDateInTimezone(now);
+    const currentMonth = `${tzDate.getFullYear()}-${String(tzDate.getMonth() + 1).padStart(2, '0')}`;
+    const currentHour = `${today}:${String(getHourInTimezone(now)).padStart(2, '0')}`;
+    
+    // 共享池级别统计的键
+    const poolKey = `pool_usage:${poolId}`;
+    const poolDaily = `pool_usage:daily:${poolId}:${today}`;
+    const poolMonthly = `pool_usage:monthly:${poolId}:${currentMonth}`;
+    const poolHourly = `pool_usage:hourly:${poolId}:${currentHour}`;
+    
+    // 共享池-账户统计的键
+    const poolAccountDaily = `pool_usage:account:daily:${poolId}:${accountId}:${today}`;
+    const poolAccountMonthly = `pool_usage:account:monthly:${poolId}:${accountId}:${currentMonth}`;
+    const poolAccountHourly = `pool_usage:account:hourly:${poolId}:${accountId}:${currentHour}`;
+    
+    // 共享池按模型统计的键
+    const poolModelDaily = `pool_usage:model:daily:${poolId}:${model}:${today}`;
+    const poolModelMonthly = `pool_usage:model:monthly:${poolId}:${model}:${currentMonth}`;
+    const poolModelHourly = `pool_usage:model:hourly:${poolId}:${model}:${currentHour}`;
+    
+    // 处理token分配
+    const finalInputTokens = inputTokens || 0;
+    const finalOutputTokens = outputTokens || 0;
+    const finalCacheCreateTokens = cacheCreateTokens || 0;
+    const finalCacheReadTokens = cacheReadTokens || 0;
+    const actualTotalTokens = finalInputTokens + finalOutputTokens + finalCacheCreateTokens + finalCacheReadTokens;
+    const coreTokens = finalInputTokens + finalOutputTokens;
+
+    await Promise.all([
+      // 共享池总体统计
+      this.client.hincrby(poolKey, 'totalTokens', coreTokens),
+      this.client.hincrby(poolKey, 'totalInputTokens', finalInputTokens),
+      this.client.hincrby(poolKey, 'totalOutputTokens', finalOutputTokens),
+      this.client.hincrby(poolKey, 'totalCacheCreateTokens', finalCacheCreateTokens),
+      this.client.hincrby(poolKey, 'totalCacheReadTokens', finalCacheReadTokens),
+      this.client.hincrby(poolKey, 'totalAllTokens', actualTotalTokens),
+      this.client.hincrby(poolKey, 'totalRequests', 1),
+      
+      // 共享池每日统计
+      this.client.hincrby(poolDaily, 'tokens', coreTokens),
+      this.client.hincrby(poolDaily, 'inputTokens', finalInputTokens),
+      this.client.hincrby(poolDaily, 'outputTokens', finalOutputTokens),
+      this.client.hincrby(poolDaily, 'cacheCreateTokens', finalCacheCreateTokens),
+      this.client.hincrby(poolDaily, 'cacheReadTokens', finalCacheReadTokens),
+      this.client.hincrby(poolDaily, 'allTokens', actualTotalTokens),
+      this.client.hincrby(poolDaily, 'requests', 1),
+      this.client.expire(poolDaily, 90 * 24 * 60 * 60),
+      
+      // 共享池每月统计
+      this.client.hincrby(poolMonthly, 'tokens', coreTokens),
+      this.client.hincrby(poolMonthly, 'inputTokens', finalInputTokens),
+      this.client.hincrby(poolMonthly, 'outputTokens', finalOutputTokens),
+      this.client.hincrby(poolMonthly, 'cacheCreateTokens', finalCacheCreateTokens),
+      this.client.hincrby(poolMonthly, 'cacheReadTokens', finalCacheReadTokens),
+      this.client.hincrby(poolMonthly, 'allTokens', actualTotalTokens),
+      this.client.hincrby(poolMonthly, 'requests', 1),
+      this.client.expire(poolMonthly, 365 * 24 * 60 * 60),
+      
+      // 共享池-账户每日统计
+      this.client.hincrby(poolAccountDaily, 'tokens', coreTokens),
+      this.client.hincrby(poolAccountDaily, 'inputTokens', finalInputTokens),
+      this.client.hincrby(poolAccountDaily, 'outputTokens', finalOutputTokens),
+      this.client.hincrby(poolAccountDaily, 'cacheCreateTokens', finalCacheCreateTokens),
+      this.client.hincrby(poolAccountDaily, 'cacheReadTokens', finalCacheReadTokens),
+      this.client.hincrby(poolAccountDaily, 'allTokens', actualTotalTokens),
+      this.client.hincrby(poolAccountDaily, 'requests', 1),
+      this.client.expire(poolAccountDaily, 90 * 24 * 60 * 60),
+      
+      // 共享池按模型统计
+      this.client.hincrby(poolModelDaily, 'tokens', coreTokens),
+      this.client.hincrby(poolModelDaily, 'inputTokens', finalInputTokens),
+      this.client.hincrby(poolModelDaily, 'outputTokens', finalOutputTokens),
+      this.client.hincrby(poolModelDaily, 'cacheCreateTokens', finalCacheCreateTokens),
+      this.client.hincrby(poolModelDaily, 'cacheReadTokens', finalCacheReadTokens),
+      this.client.hincrby(poolModelDaily, 'allTokens', actualTotalTokens),
+      this.client.hincrby(poolModelDaily, 'requests', 1),
+      this.client.expire(poolModelDaily, 90 * 24 * 60 * 60)
+    ]);
+  }
+
+  // 📊 获取共享池使用统计
+  async getPoolUsageStats(poolId) {
+    const poolKey = `pool_usage:${poolId}`;
+    const today = getDateStringInTimezone();
+    const poolDailyKey = `pool_usage:daily:${poolId}:${today}`;
+    const tzDate = getDateInTimezone();
+    const currentMonth = `${tzDate.getFullYear()}-${String(tzDate.getMonth() + 1).padStart(2, '0')}`;
+    const poolMonthlyKey = `pool_usage:monthly:${poolId}:${currentMonth}`;
+
+    const [total, daily, monthly] = await Promise.all([
+      this.client.hgetall(poolKey),
+      this.client.hgetall(poolDailyKey),
+      this.client.hgetall(poolMonthlyKey)
+    ]);
+
+    const handlePoolData = (data) => {
+      const tokens = parseInt(data.totalTokens) || parseInt(data.tokens) || 0;
+      const inputTokens = parseInt(data.totalInputTokens) || parseInt(data.inputTokens) || 0;
+      const outputTokens = parseInt(data.totalOutputTokens) || parseInt(data.outputTokens) || 0;
+      const requests = parseInt(data.totalRequests) || parseInt(data.requests) || 0;
+      const cacheCreateTokens = parseInt(data.totalCacheCreateTokens) || parseInt(data.cacheCreateTokens) || 0;
+      const cacheReadTokens = parseInt(data.totalCacheReadTokens) || parseInt(data.cacheReadTokens) || 0;
+      const allTokens = parseInt(data.totalAllTokens) || parseInt(data.allTokens) || 0;
+
+      const actualAllTokens = allTokens || (inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens);
+
+      return {
+        tokens: tokens,
+        inputTokens: inputTokens,
+        outputTokens: outputTokens,
+        cacheCreateTokens: cacheCreateTokens,
+        cacheReadTokens: cacheReadTokens,
+        allTokens: actualAllTokens,
+        requests: requests
+      };
+    };
+
+    const totalData = handlePoolData(total);
+    const dailyData = handlePoolData(daily);
+    const monthlyData = handlePoolData(monthly);
+
+    return {
+      poolId: poolId,
+      total: totalData,
+      daily: dailyData,
+      monthly: monthlyData
+    };
+  }
+
+  // 📊 获取共享池中特定账户的使用统计
+  async getPoolAccountUsageStats(poolId, accountId) {
+    const today = getDateStringInTimezone();
+    const tzDate = getDateInTimezone();
+    const currentMonth = `${tzDate.getFullYear()}-${String(tzDate.getMonth() + 1).padStart(2, '0')}`;
+    
+    const dailyKey = `pool_usage:account:daily:${poolId}:${accountId}:${today}`;
+    const monthlyKey = `pool_usage:account:monthly:${poolId}:${accountId}:${currentMonth}`;
+
+    const [daily, monthly] = await Promise.all([
+      this.client.hgetall(dailyKey),
+      this.client.hgetall(monthlyKey)
+    ]);
+
+    const handleData = (data) => {
+      const tokens = parseInt(data.tokens) || 0;
+      const inputTokens = parseInt(data.inputTokens) || 0;
+      const outputTokens = parseInt(data.outputTokens) || 0;
+      const requests = parseInt(data.requests) || 0;
+      const cacheCreateTokens = parseInt(data.cacheCreateTokens) || 0;
+      const cacheReadTokens = parseInt(data.cacheReadTokens) || 0;
+      const allTokens = parseInt(data.allTokens) || 0;
+
+      const actualAllTokens = allTokens || (inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens);
+
+      return {
+        tokens: tokens,
+        inputTokens: inputTokens,
+        outputTokens: outputTokens,
+        cacheCreateTokens: cacheCreateTokens,
+        cacheReadTokens: cacheReadTokens,
+        allTokens: actualAllTokens,
+        requests: requests
+      };
+    };
+
+    return {
+      poolId: poolId,
+      accountId: accountId,
+      daily: handleData(daily),
+      monthly: handleData(monthly)
+    };
+  }
+
+  // 📊 获取共享池中所有账户的使用统计
+  async getPoolAccountsUsage(poolId, date = null) {
+    try {
+      const targetDate = date || getDateStringInTimezone();
+      const pattern = `pool_usage:account:daily:${poolId}:*:${targetDate}`;
+      const keys = await this.client.keys(pattern);
+      
+      const accountsUsage = [];
+      
+      for (const key of keys) {
+        // 从key中提取accountId
+        const parts = key.split(':');
+        const accountId = parts[5]; // pool_usage:account:daily:{poolId}:{accountId}:{date}
+        
+        const usage = await this.client.hgetall(key);
+        
+        accountsUsage.push({
+          accountId,
+          date: targetDate,
+          tokens: parseInt(usage.tokens || 0),
+          inputTokens: parseInt(usage.inputTokens || 0),
+          outputTokens: parseInt(usage.outputTokens || 0),
+          cacheCreateTokens: parseInt(usage.cacheCreateTokens || 0),
+          cacheReadTokens: parseInt(usage.cacheReadTokens || 0),
+          allTokens: parseInt(usage.allTokens || 0),
+          requests: parseInt(usage.requests || 0)
+        });
+      }
+      
+      // 按照使用量排序
+      accountsUsage.sort((a, b) => b.allTokens - a.allTokens);
+      
+      return accountsUsage;
+    } catch (error) {
+      logger.error('❌ Failed to get pool accounts usage:', error);
+      throw error;
+    }
+  }
+
+  async getPoolUsageStats(poolId) {
+    const totalKey = `pool_usage:${poolId}`;
+    const today = getDateStringInTimezone();
+    const dailyKey = `pool_usage:daily:${poolId}:${today}`;
+    const tzDate = getDateInTimezone();
+    const currentMonth = `${tzDate.getFullYear()}-${String(tzDate.getMonth() + 1).padStart(2, '0')}`;
+    const monthlyKey = `pool_usage:monthly:${poolId}:${currentMonth}`;
+
+    const [total, daily, monthly] = await Promise.all([
+      this.client.hgetall(totalKey),
+      this.client.hgetall(dailyKey),
+      this.client.hgetall(monthlyKey)
+    ]);
+
+    const handlePoolData = (data) => {
+      const tokens = parseInt(data.totalTokens) || parseInt(data.tokens) || 0;
+      const inputTokens = parseInt(data.totalInputTokens) || parseInt(data.inputTokens) || 0;
+      const outputTokens = parseInt(data.totalOutputTokens) || parseInt(data.outputTokens) || 0;
+      const requests = parseInt(data.totalRequests) || parseInt(data.requests) || 0;
+      const cacheCreateTokens = parseInt(data.totalCacheCreateTokens) || parseInt(data.cacheCreateTokens) || 0;
+      const cacheReadTokens = parseInt(data.totalCacheReadTokens) || parseInt(data.cacheReadTokens) || 0;
+      const allTokens = parseInt(data.totalAllTokens) || parseInt(data.allTokens) || 0;
+
+      const actualAllTokens = allTokens || (inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens);
+
+      return {
+        tokens: tokens,
+        inputTokens: inputTokens,
+        outputTokens: outputTokens,
+        cacheCreateTokens: cacheCreateTokens,
+        cacheReadTokens: cacheReadTokens,
+        allTokens: actualAllTokens,
+        requests: requests
+      };
+    };
+
+    const totalData = handlePoolData(total);
+    const dailyData = handlePoolData(daily);
+    const monthlyData = handlePoolData(monthly);
+
+    return {
+      poolId: poolId,
+      total: totalData,
+      daily: dailyData,
+      monthly: monthlyData
+    };
+  }
+
+  // 📊 获取共享池中每个账户的使用统计
+  async getPoolAccountsUsage(poolId, date = null) {
+    try {
+      const targetDate = date || getDateStringInTimezone();
+      const pattern = `pool_usage:account:daily:${poolId}:*:${targetDate}`;
+      const keys = await this.client.keys(pattern);
+      
+      const accountsUsage = [];
+      
+      for (const key of keys) {
+        // 从key中提取accountId
+        const parts = key.split(':');
+        const accountId = parts[5]; // pool_usage:account:daily:{poolId}:{accountId}:{date}
+        
+        const usage = await this.client.hgetall(key);
+        
+        accountsUsage.push({
+          accountId,
+          date: targetDate,
+          tokens: parseInt(usage.tokens || 0),
+          inputTokens: parseInt(usage.inputTokens || 0),
+          outputTokens: parseInt(usage.outputTokens || 0),
+          cacheCreateTokens: parseInt(usage.cacheCreateTokens || 0),
+          cacheReadTokens: parseInt(usage.cacheReadTokens || 0),
+          allTokens: parseInt(usage.allTokens || 0),
+          requests: parseInt(usage.requests || 0)
+        });
+      }
+      
+      // 按使用量排序
+      return accountsUsage.sort((a, b) => b.allTokens - a.allTokens);
+    } catch (error) {
+      logger.error(`❌ Failed to get pool accounts usage for pool ${poolId}:`, error);
+      return [];
+    }
+  }
 }
 
 const redisClient = new RedisClient();

@@ -278,8 +278,8 @@ class ApiKeyService {
     }
   }
 
-  // 📊 记录使用情况（支持缓存token和账户级别统计）
-  async recordUsage(keyId, inputTokens = 0, outputTokens = 0, cacheCreateTokens = 0, cacheReadTokens = 0, model = 'unknown', accountId = null) {
+  // 📊 记录使用情况（支持缓存token、账户级别和共享池统计）
+  async recordUsage(keyId, inputTokens = 0, outputTokens = 0, cacheCreateTokens = 0, cacheReadTokens = 0, model = 'unknown', accountId = null, poolId = null) {
     try {
       const totalTokens = inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens;
       
@@ -316,6 +316,12 @@ class ApiKeyService {
           logger.database(`📊 Recorded account usage: ${accountId} - ${totalTokens} tokens (API Key: ${keyId})`);
         } else {
           logger.debug('⚠️ No accountId provided for usage recording, skipping account-level statistics');
+        }
+        
+        // 记录共享池级别的使用统计
+        if (poolId && accountId) {
+          await redis.incrementPoolUsage(poolId, accountId, totalTokens, inputTokens, outputTokens, cacheCreateTokens, cacheReadTokens, model);
+          logger.database(`🏊 Recorded pool usage: ${poolId} - ${totalTokens} tokens (Account: ${accountId})`);
         }
       }
       

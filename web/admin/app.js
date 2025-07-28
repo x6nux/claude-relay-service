@@ -368,7 +368,17 @@ const app = createApp({
             showAccountPoolsModal: false,
             currentAccountForPools: null,
             accountCurrentPools: [],
-            accountAvailablePools: []
+            accountAvailablePools: [],
+            
+            // 共享池统计相关
+            showPoolUsageModal: false,
+            poolUsageData: null,
+            poolUsageLoading: false,
+            currentPoolUsage: null,
+            poolAccountsUsage: [],
+            poolAccountsUsageLoading: false,
+            poolUsageTab: 'total', // total, daily, monthly
+            poolUsageCustomDate: null // 自定义日期
         }
     },
     
@@ -4459,6 +4469,98 @@ const app = createApp({
             this.currentManagePool = null;
             this.poolAccounts = [];
             this.availablePoolAccounts = [];
+        },
+        
+        // 查看共享池统计
+        async viewPoolUsage(pool) {
+            this.currentPoolUsage = pool;
+            this.showPoolUsageModal = true;
+            this.poolUsageTab = 'total';
+            this.poolUsageCustomDate = null;
+            
+            // 加载池的使用统计
+            await this.loadPoolUsage(pool.id);
+            
+            // 加载账户级别的统计
+            await this.loadPoolAccountsUsage(pool.id);
+        },
+        
+        // 关闭池统计模态框
+        closePoolUsageModal() {
+            this.showPoolUsageModal = false;
+            this.currentPoolUsage = null;
+            this.poolUsageData = null;
+            this.poolAccountsUsage = [];
+            this.poolUsageCustomDate = null;
+        },
+        
+        // 加载池使用统计
+        async loadPoolUsage(poolId) {
+            this.poolUsageLoading = true;
+            try {
+                const response = await fetch(`/admin/shared-pools/${poolId}/usage`, {
+                    headers: {
+                        'Authorization': `Bearer ${this.authToken}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    this.poolUsageData = result.data;
+                } else {
+                    throw new Error(result.message || '加载池统计失败');
+                }
+            } catch (error) {
+                console.error('Error loading pool usage:', error);
+                this.showToast('加载池统计失败: ' + error.message, 'error');
+            } finally {
+                this.poolUsageLoading = false;
+            }
+        },
+        
+        // 加载池中账户的使用统计
+        async loadPoolAccountsUsage(poolId, date = null) {
+            this.poolAccountsUsageLoading = true;
+            try {
+                let url = `/admin/shared-pools/${poolId}/usage/accounts`;
+                if (date) {
+                    url += `?date=${date}`;
+                }
+                
+                const response = await fetch(url, {
+                    headers: {
+                        'Authorization': `Bearer ${this.authToken}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    this.poolAccountsUsage = result.data;
+                } else {
+                    throw new Error(result.message || '加载账户统计失败');
+                }
+            } catch (error) {
+                console.error('Error loading pool accounts usage:', error);
+                this.showToast('加载账户统计失败: ' + error.message, 'error');
+            } finally {
+                this.poolAccountsUsageLoading = false;
+            }
+        },
+        
+        // 获取账户名称
+        getAccountName(accountId) {
+            const account = this.accounts.find(a => a.id === accountId);
+            return account ? account.name : accountId;
         },
         
         // 加载池中的账户

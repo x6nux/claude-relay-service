@@ -206,7 +206,9 @@ async function handleChatCompletion(req, res, apiKeyData) {
     const sessionHash = sessionHelper.generateSessionHash(claudeRequest);
     
     // 选择可用的Claude账户
-    const accountId = await claudeAccountService.selectAccountForApiKey(apiKeyData, sessionHash);
+    const selection = await claudeAccountService.selectAccountForApiKey(apiKeyData, sessionHash);
+    const accountId = selection.accountId;
+    const poolId = selection.poolId;
     
     // 获取该账号存储的 Claude Code headers
     const claudeCodeHeaders = await claudeCodeHeadersService.getAccountHeaders(accountId);
@@ -259,7 +261,8 @@ async function handleChatCompletion(req, res, apiKeyData) {
               cacheCreateTokens, 
               cacheReadTokens, 
               model,
-              accountId
+              accountId,
+              poolId
             ).catch(error => {
               logger.error('❌ Failed to record usage:', error);
             });
@@ -329,7 +332,8 @@ async function handleChatCompletion(req, res, apiKeyData) {
           usage.cache_creation_input_tokens || 0,
           usage.cache_read_input_tokens || 0,
           claudeRequest.model,
-          accountId
+          accountId,
+          poolId
         ).catch(error => {
           logger.error('❌ Failed to record usage:', error);
         });

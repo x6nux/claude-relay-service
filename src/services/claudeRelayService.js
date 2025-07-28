@@ -103,12 +103,16 @@ class ClaudeRelayService {
         const sessionHash = sessionHelper.generateSessionHash(requestBody);
         
         // 选择可用的Claude账户（支持专属绑定和sticky会话）
-        let accountId;
+        let accountId, poolId;
         if (retryCount === 0) {
-          accountId = await claudeAccountService.selectAccountForApiKey(apiKeyData, sessionHash);
+          const selection = await claudeAccountService.selectAccountForApiKey(apiKeyData, sessionHash);
+          accountId = selection.accountId;
+          poolId = selection.poolId;
         } else {
           // 重试时，需要选择不同的账户
-          accountId = await claudeAccountService.selectAccountForApiKey(apiKeyData, null, usedAccountIds);
+          const selection = await claudeAccountService.selectAccountForApiKey(apiKeyData, null, usedAccountIds);
+          accountId = selection.accountId;
+          poolId = selection.poolId;
           logger.info(`🔄 Retry ${retryCount}/${maxRetries - 1}: Switching to new account ${accountId}`);
         }
         
@@ -325,8 +329,9 @@ class ClaudeRelayService {
           await circuitBreakerService.recordSuccess(accountId);
           await accountRecoveryService.recordAccountSuccess(accountId);
           
-          // 在响应中添加accountId，以便调用方记录账户级别统计
+          // 在响应中添加accountId和poolId，以便调用方记录账户级别和共享池统计
           response.accountId = accountId;
+          response.poolId = poolId;
           return response;
         }
         
@@ -783,7 +788,9 @@ class ClaudeRelayService {
       const sessionHash = sessionHelper.generateSessionHash(requestBody);
       
       // 选择可用的Claude账户（支持专属绑定和sticky会话）
-      const accountId = await claudeAccountService.selectAccountForApiKey(apiKeyData, sessionHash);
+      const selection = await claudeAccountService.selectAccountForApiKey(apiKeyData, sessionHash);
+      const accountId = selection.accountId;
+      const poolId = selection.poolId;
       
       // 检查熔断器状态
       const circuitCheck = await circuitBreakerService.canRequest(accountId);
@@ -816,8 +823,8 @@ class ClaudeRelayService {
       
       // 发送流式请求并捕获usage数据
       return await this._makeClaudeStreamRequestWithUsageCapture(processedBody, accessToken, proxyAgent, clientHeaders, responseStream, (usageData) => {
-        // 在usageCallback中添加accountId
-        usageCallback({ ...usageData, accountId });
+        // 在usageCallback中添加accountId和poolId
+        usageCallback({ ...usageData, accountId, poolId });
       }, accountId, sessionHash, streamTransformer, options);
     } catch (error) {
       logger.error('❌ Claude stream relay with usage capture failed:', error);
