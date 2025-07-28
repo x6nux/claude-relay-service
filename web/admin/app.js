@@ -4491,7 +4491,7 @@ const app = createApp({
         async addAccountToPool(accountId) {
             if (!this.currentManagePool) return;
             
-            this.$set(this.addAccountToPoolLoading, accountId, true);
+            this.addAccountToPoolLoading[accountId] = true;
             try {
                 const response = await fetch(`/admin/shared-pools/${this.currentManagePool.id}/accounts`, {
                     method: 'POST',
@@ -4514,7 +4514,7 @@ const app = createApp({
                 console.error('添加账户失败:', error);
                 this.showToast(error.message || '添加账户失败', 'error');
             } finally {
-                this.$delete(this.addAccountToPoolLoading, accountId);
+                delete this.addAccountToPoolLoading[accountId];
             }
         },
         
@@ -4522,7 +4522,7 @@ const app = createApp({
         async removeAccountFromPool(accountId) {
             if (!this.currentManagePool) return;
             
-            this.$set(this.removeAccountFromPoolLoading, accountId, true);
+            this.removeAccountFromPoolLoading[accountId] = true;
             try {
                 const response = await fetch(`/admin/shared-pools/${this.currentManagePool.id}/accounts/${accountId}`, {
                     method: 'DELETE',
@@ -4543,7 +4543,7 @@ const app = createApp({
                 console.error('移除账户失败:', error);
                 this.showToast(error.message || '移除账户失败', 'error');
             } finally {
-                this.$delete(this.removeAccountFromPoolLoading, accountId);
+                delete this.removeAccountFromPoolLoading[accountId];
             }
         },
         
@@ -4616,7 +4616,7 @@ const app = createApp({
         async addAccountToPoolInModal(poolId) {
             if (!this.currentAccountForPools) return;
             
-            this.$set(this.addAccountToPoolLoading, poolId, true);
+            this.addAccountToPoolLoading[poolId] = true;
             try {
                 const response = await fetch(`/admin/shared-pools/${poolId}/accounts`, {
                     method: 'POST',
@@ -4638,7 +4638,7 @@ const app = createApp({
                 console.error('添加账户到共享池失败:', error);
                 this.showToast(error.message || '添加失败', 'error');
             } finally {
-                this.$delete(this.addAccountToPoolLoading, poolId);
+                delete this.addAccountToPoolLoading[poolId];
             }
         },
         
@@ -4646,7 +4646,7 @@ const app = createApp({
         async removeAccountFromPoolInModal(poolId) {
             if (!this.currentAccountForPools) return;
             
-            this.$set(this.removeAccountFromPoolLoading, poolId, true);
+            this.removeAccountFromPoolLoading[poolId] = true;
             try {
                 const response = await fetch(`/admin/shared-pools/${poolId}/accounts/${this.currentAccountForPools.id}`, {
                     method: 'DELETE',
@@ -4666,7 +4666,7 @@ const app = createApp({
                 console.error('从共享池移除账户失败:', error);
                 this.showToast(error.message || '移除失败', 'error');
             } finally {
-                this.$delete(this.removeAccountFromPoolLoading, poolId);
+                delete this.removeAccountFromPoolLoading[poolId];
             }
         }
     }
