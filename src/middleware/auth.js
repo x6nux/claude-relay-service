@@ -3,6 +3,7 @@ const logger = require('../utils/logger');
 const redis = require('../models/redis');
 const { RateLimiterRedis } = require('rate-limiter-flexible');
 const config = require('../../config/config');
+const { getRealIP } = require('../utils/common');
 
 // 🔑 API Key验证中间件（优化版）
 const authenticateApiKey = async (req, res, next) => {
@@ -15,7 +16,7 @@ const authenticateApiKey = async (req, res, next) => {
                    req.headers['api-key'];
     
     if (!apiKey) {
-      logger.security(`🔒 Missing API key attempt from ${req.ip || 'unknown'}`);
+      logger.security(`🔒 Missing API key attempt from ${getRealIP(req)}`);
       return res.status(401).json({
         error: 'Missing API key',
         message: 'Please provide an API key in the x-api-key header or Authorization header'
@@ -24,7 +25,7 @@ const authenticateApiKey = async (req, res, next) => {
 
     // 基本API Key格式验证
     if (typeof apiKey !== 'string' || apiKey.length < 10 || apiKey.length > 512) {
-      logger.security(`🔒 Invalid API key format from ${req.ip || 'unknown'}`);
+      logger.security(`🔒 Invalid API key format from ${getRealIP(req)}`);
       return res.status(401).json({
         error: 'Invalid API key format',
         message: 'API key format is invalid'
@@ -35,7 +36,7 @@ const authenticateApiKey = async (req, res, next) => {
     const validation = await apiKeyService.validateApiKey(apiKey);
     
     if (!validation.valid) {
-      const clientIP = req.ip || req.connection?.remoteAddress || 'unknown';
+      const clientIP = getRealIP(req);
       logger.security(`🔒 Invalid API key attempt: ${validation.error} from ${clientIP}`);
       return res.status(401).json({
         error: 'Invalid API key',
@@ -46,7 +47,7 @@ const authenticateApiKey = async (req, res, next) => {
     // 🔒 检查客户端限制
     if (validation.keyData.enableClientRestriction && validation.keyData.allowedClients?.length > 0) {
       const userAgent = req.headers['user-agent'] || '';
-      const clientIP = req.ip || req.connection?.remoteAddress || 'unknown';
+      const clientIP = getRealIP(req);
       
       // 记录客户端限制检查开始
       logger.api(`🔍 Checking client restriction for key: ${validation.keyData.id} (${validation.keyData.name})`);
@@ -292,7 +293,7 @@ const authenticateApiKey = async (req, res, next) => {
     logger.error(`❌ Authentication middleware error (${authDuration}ms):`, {
       error: error.message,
       stack: error.stack,
-      ip: req.ip,
+      ip: getRealIP(req),
       userAgent: req.get('User-Agent'),
       url: req.originalUrl
     });
@@ -315,7 +316,7 @@ const authenticateAdmin = async (req, res, next) => {
                   req.headers['x-admin-token'];
     
     if (!token) {
-      logger.security(`🔒 Missing admin token attempt from ${req.ip || 'unknown'}`);
+      logger.security(`🔒 Missing admin token attempt from ${getRealIP(req)}`);
       return res.status(401).json({
         error: 'Missing admin token',
         message: 'Please provide an admin token'
@@ -324,7 +325,7 @@ const authenticateAdmin = async (req, res, next) => {
 
     // 基本token格式验证
     if (typeof token !== 'string' || token.length < 32 || token.length > 512) {
-      logger.security(`🔒 Invalid admin token format from ${req.ip || 'unknown'}`);
+      logger.security(`🔒 Invalid admin token format from ${getRealIP(req)}`);
       return res.status(401).json({
         error: 'Invalid admin token format',
         message: 'Admin token format is invalid'
@@ -340,7 +341,7 @@ const authenticateAdmin = async (req, res, next) => {
     ]);
     
     if (!adminSession || Object.keys(adminSession).length === 0) {
-      logger.security(`🔒 Invalid admin token attempt from ${req.ip || 'unknown'}`);
+      logger.security(`🔒 Invalid admin token attempt from ${getRealIP(req)}`);
       return res.status(401).json({
         error: 'Invalid admin token',
         message: 'Invalid or expired admin session'
@@ -354,7 +355,7 @@ const authenticateAdmin = async (req, res, next) => {
     const maxInactivity = 24 * 60 * 60 * 1000; // 24小时
 
     if (inactiveDuration > maxInactivity) {
-      logger.security(`🔒 Expired admin session for ${adminSession.username} from ${req.ip || 'unknown'}`);
+      logger.security(`🔒 Expired admin session for ${adminSession.username} from ${getRealIP(req)}`);
       await redis.deleteSession(token); // 清理过期会话
       return res.status(401).json({
         error: 'Session expired',
@@ -386,7 +387,7 @@ const authenticateAdmin = async (req, res, next) => {
     const authDuration = Date.now() - startTime;
     logger.error(`❌ Admin authentication error (${authDuration}ms):`, {
       error: error.message,
-      ip: req.ip,
+      ip: getRealIP(req),
       userAgent: req.get('User-Agent'),
       url: req.originalUrl
     });
@@ -454,8 +455,8 @@ const requestLogger = (req, res, next) => {
   req.requestId = requestId;
   res.setHeader('X-Request-ID', requestId);
   
-  // 获取客户端信息
-  const clientIP = req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress || 'unknown';
+  // 获取客户端信息 - 使用统一的 IP 获取函数
+  const clientIP = getRealIP(req);
   const userAgent = req.get('User-Agent') || 'unknown';
   const referer = req.get('Referer') || 'none';
   
@@ -576,7 +577,7 @@ const errorHandler = (error, req, res, _next) => {
     stack: error.stack,
     url: req.originalUrl,
     method: req.method,
-    ip: req.ip || 'unknown',
+    ip: getRealIP(req),
     userAgent: req.get('User-Agent') || 'unknown',
     apiKey: req.apiKey ? req.apiKey.id : 'none',
     admin: req.admin ? req.admin.username : 'none'
@@ -719,7 +720,7 @@ const requestSizeLimit = (req, res, next) => {
   const contentLength = parseInt(req.headers['content-length'] || '0');
   
   if (contentLength > maxSize) {
-    logger.security(`🚨 Request too large: ${contentLength} bytes from ${req.ip}`);
+    logger.security(`🚨 Request too large: ${contentLength} bytes from ${getRealIP(req)}`);
     return res.status(413).json({
       error: 'Payload Too Large',
       message: 'Request body size exceeds limit',

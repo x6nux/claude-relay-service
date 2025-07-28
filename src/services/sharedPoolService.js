@@ -171,13 +171,16 @@ class SharedPoolService {
 
       logger.success(`🏊 Created default shared pool`);
       
+      // 获取实际添加到默认池的账户ID
+      const finalAccountIds = await client.smembers(`${this.POOL_ACCOUNTS_KEY_PREFIX}${this.DEFAULT_POOL_ID}`);
+      
       return {
         id: this.DEFAULT_POOL_ID,
         ...poolData,
         isActive: true,
         priority: 0,
         maxConcurrency: 0,
-        accountIds: sharedAccounts.map(acc => acc.id)
+        accountIds: finalAccountIds
       };
     } catch (error) {
       logger.error('❌ Failed to get or create default pool:', error);

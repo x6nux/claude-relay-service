@@ -5,6 +5,7 @@ const redis = require('../models/redis');
 const logger = require('../utils/logger');
 const apiKeyService = require('../services/apiKeyService');
 const CostCalculator = require('../utils/costCalculator');
+const { getRealIP } = require('../utils/common');
 
 const router = express.Router();
 
@@ -73,7 +74,7 @@ router.post('/api/get-key-id', async (req, res) => {
     const validation = await apiKeyService.validateApiKey(apiKey);
     
     if (!validation.valid) {
-      const clientIP = req.ip || req.connection?.remoteAddress || 'unknown';
+      const clientIP = getRealIP(req);
       logger.security(`🔒 Invalid API key in get-key-id: ${validation.error} from ${clientIP}`);
       return res.status(401).json({
         error: 'Invalid API key',
@@ -120,7 +121,7 @@ router.post('/api/user-stats', async (req, res) => {
       keyData = await redis.getApiKey(apiId);
       
       if (!keyData || Object.keys(keyData).length === 0) {
-        logger.security(`🔒 API key not found for ID: ${apiId} from ${req.ip || 'unknown'}`);
+        logger.security(`🔒 API key not found for ID: ${apiId} from ${getRealIP(req)}`);
         return res.status(404).json({
           error: 'API key not found',
           message: 'The specified API key does not exist'
@@ -188,7 +189,7 @@ router.post('/api/user-stats', async (req, res) => {
     } else if (apiKey) {
       // 通过 apiKey 查询（保持向后兼容）
       if (typeof apiKey !== 'string' || apiKey.length < 10 || apiKey.length > 512) {
-        logger.security(`🔒 Invalid API key format in user stats query from ${req.ip || 'unknown'}`);
+        logger.security(`🔒 Invalid API key format in user stats query from ${getRealIP(req)}`);
         return res.status(400).json({
           error: 'Invalid API key format',
           message: 'API key format is invalid'
@@ -199,7 +200,7 @@ router.post('/api/user-stats', async (req, res) => {
       const validation = await apiKeyService.validateApiKey(apiKey);
       
       if (!validation.valid) {
-        const clientIP = req.ip || req.connection?.remoteAddress || 'unknown';
+        const clientIP = getRealIP(req);
         logger.security(`🔒 Invalid API key in user stats query: ${validation.error} from ${clientIP}`);
         return res.status(401).json({
           error: 'Invalid API key',
@@ -211,7 +212,7 @@ router.post('/api/user-stats', async (req, res) => {
       keyId = keyData.id;
       
     } else {
-      logger.security(`🔒 Missing API key or ID in user stats query from ${req.ip || 'unknown'}`);
+      logger.security(`🔒 Missing API key or ID in user stats query from ${getRealIP(req)}`);
       return res.status(400).json({
         error: 'API Key or ID is required',
         message: 'Please provide your API Key or API ID'
@@ -219,7 +220,7 @@ router.post('/api/user-stats', async (req, res) => {
     }
 
     // 记录合法查询
-    logger.api(`📊 User stats query from key: ${keyData.name} (${keyId}) from ${req.ip || 'unknown'}`);
+    logger.api(`📊 User stats query from key: ${keyData.name} (${keyId}) from ${getRealIP(req)}`);
 
     // 获取验证结果中的完整keyData（包含isActive状态和cost信息）
     const fullKeyData = keyData;
@@ -393,7 +394,7 @@ router.post('/api/user-model-stats', async (req, res) => {
       keyData = await redis.getApiKey(apiId);
       
       if (!keyData || Object.keys(keyData).length === 0) {
-        logger.security(`🔒 API key not found for ID: ${apiId} from ${req.ip || 'unknown'}`);
+        logger.security(`🔒 API key not found for ID: ${apiId} from ${getRealIP(req)}`);
         return res.status(404).json({
           error: 'API key not found',
           message: 'The specified API key does not exist'
@@ -420,7 +421,7 @@ router.post('/api/user-model-stats', async (req, res) => {
       const validation = await apiKeyService.validateApiKey(apiKey);
       
       if (!validation.valid) {
-        const clientIP = req.ip || req.connection?.remoteAddress || 'unknown';
+        const clientIP = getRealIP(req);
         logger.security(`🔒 Invalid API key in user model stats query: ${validation.error} from ${clientIP}`);
         return res.status(401).json({
           error: 'Invalid API key',

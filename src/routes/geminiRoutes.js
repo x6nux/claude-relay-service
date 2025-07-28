@@ -5,12 +5,13 @@ const { authenticateApiKey } = require('../middleware/auth');
 const geminiAccountService = require('../services/geminiAccountService');
 const { sendGeminiRequest, getAvailableModels } = require('../services/geminiRelayService');
 const crypto = require('crypto');
+const { getRealIP } = require('../utils/common');
 
 // 生成会话哈希
 function generateSessionHash(req) {
   const sessionData = [
     req.headers['user-agent'],
-    req.ip,
+    getRealIP(req),
     req.headers['x-api-key']?.substring(0, 10)
   ].filter(Boolean).join(':');
   

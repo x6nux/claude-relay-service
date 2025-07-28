@@ -1145,6 +1145,12 @@
                                                 <i class="fas fa-edit mr-1"></i>编辑
                                             </button>
                                             <button 
+                                                @click="manageAccountPools(account)" 
+                                                class="text-purple-600 hover:text-purple-900 font-medium hover:bg-purple-50 px-3 py-1 rounded-lg transition-colors"
+                                            >
+                                                <i class="fas fa-swimming-pool mr-1"></i>共享池
+                                            </button>
+                                            <button 
                                                 @click="deleteAccount(account.id)" 
                                                 class="text-red-600 hover:text-red-900 font-medium hover:bg-red-50 px-3 py-1 rounded-lg transition-colors"
                                             >
@@ -4377,6 +4383,102 @@
                         </button>
                     </div>
                 </form>
+            </div>
+        </div>
+        
+        <!-- 管理账户共享池模态框 -->
+        <div v-if="showAccountPoolsModal" class="fixed inset-0 modal z-50 flex items-center justify-center p-4">
+            <div class="modal-content w-full max-w-3xl p-8 mx-auto max-h-[90vh] flex flex-col">
+                <div class="flex items-center justify-between mb-6">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center">
+                            <i class="fas fa-swimming-pool text-white"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-xl font-bold text-gray-900">管理账户共享池</h3>
+                            <p class="text-sm text-gray-600 mt-1">账户: {{ currentAccountForPools?.name }}</p>
+                        </div>
+                    </div>
+                    <button 
+                        @click="closeAccountPoolsModal"
+                        class="text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+                
+                <!-- 账户当前所属的共享池 -->
+                <div class="mb-6">
+                    <h4 class="text-sm font-semibold text-gray-700 mb-3">当前所属共享池</h4>
+                    <div v-if="accountCurrentPools.length === 0" class="text-center py-8 bg-gray-50 rounded-lg">
+                        <i class="fas fa-inbox text-4xl text-gray-300 mb-3"></i>
+                        <p class="text-gray-500">该账户未加入任何共享池</p>
+                    </div>
+                    <div v-else class="space-y-2">
+                        <div v-for="pool in accountCurrentPools" :key="pool.id" 
+                             class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                            <div class="flex items-center gap-3">
+                                <i class="fas fa-swimming-pool text-blue-500"></i>
+                                <div>
+                                    <p class="font-medium text-gray-900">{{ pool.name }}</p>
+                                    <p class="text-xs text-gray-600">优先级: {{ pool.priority }}</p>
+                                </div>
+                            </div>
+                            <button 
+                                @click="removeAccountFromPoolInModal(pool.id)"
+                                :disabled="removeAccountFromPoolLoading[pool.id]"
+                                class="text-red-600 hover:text-red-800 transition-colors"
+                            >
+                                <i v-if="removeAccountFromPoolLoading[pool.id]" class="fas fa-spinner fa-spin"></i>
+                                <i v-else class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 可加入的共享池 -->
+                <div class="flex-1 overflow-hidden flex flex-col">
+                    <h4 class="text-sm font-semibold text-gray-700 mb-3">可加入的共享池</h4>
+                    <div class="flex-1 overflow-y-auto custom-scrollbar">
+                        <div v-if="accountAvailablePools.length === 0" class="text-center py-8 bg-gray-50 rounded-lg">
+                            <p class="text-gray-500">没有其他可加入的共享池</p>
+                        </div>
+                        <div v-else class="space-y-2">
+                            <div v-for="pool in accountAvailablePools" :key="pool.id" 
+                                 class="flex items-center justify-between p-4 bg-white border border-gray-200 rounded-lg hover:border-blue-300 transition-colors">
+                                <div class="flex items-center gap-3">
+                                    <i class="fas fa-swimming-pool text-gray-400"></i>
+                                    <div>
+                                        <p class="font-medium text-gray-900">{{ pool.name }}</p>
+                                        <p class="text-xs text-gray-600">
+                                            优先级: {{ pool.priority }} | 
+                                            策略: {{ pool.accountSelectionStrategy }} | 
+                                            账户数: {{ pool.accountCount }}
+                                        </p>
+                                    </div>
+                                </div>
+                                <button 
+                                    @click="addAccountToPoolInModal(pool.id)"
+                                    :disabled="addAccountToPoolLoading[pool.id]"
+                                    class="btn btn-sm btn-primary"
+                                >
+                                    <i v-if="addAccountToPoolLoading[pool.id]" class="fas fa-spinner fa-spin mr-1"></i>
+                                    <i v-else class="fas fa-plus mr-1"></i>
+                                    加入
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="flex gap-3 mt-6">
+                    <button 
+                        @click="closeAccountPoolsModal"
+                        class="flex-1 px-6 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition-colors"
+                    >
+                        关闭
+                    </button>
+                </div>
             </div>
         </div>
         
