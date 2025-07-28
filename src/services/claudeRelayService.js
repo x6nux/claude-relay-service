@@ -65,6 +65,8 @@ class ClaudeRelayService {
     
     for (let retryCount = 0; retryCount < maxRetries; retryCount++) {
       let upstreamRequest = null;
+      let accountId = null;
+      let poolId = null;
       
       try {
         // 调试日志：查看API Key数据
@@ -103,21 +105,38 @@ class ClaudeRelayService {
         const sessionHash = sessionHelper.generateSessionHash(requestBody);
         
         // 选择可用的Claude账户（支持专属绑定和sticky会话）
-        let accountId, poolId;
-        if (retryCount === 0) {
-          const selection = await claudeAccountService.selectAccountForApiKey(apiKeyData, sessionHash);
-          accountId = selection.accountId;
-          poolId = selection.poolId;
-        } else {
-          // 重试时，需要选择不同的账户
-          const selection = await claudeAccountService.selectAccountForApiKey(apiKeyData, null, usedAccountIds);
-          accountId = selection.accountId;
-          poolId = selection.poolId;
-          logger.info(`🔄 Retry ${retryCount}/${maxRetries - 1}: Switching to new account ${accountId}`);
+        try {
+          if (retryCount === 0) {
+            const selection = await claudeAccountService.selectAccountForApiKey(apiKeyData, sessionHash);
+            accountId = selection.accountId;
+            poolId = selection.poolId;
+          } else {
+            // 重试时，需要选择不同的账户
+            const selection = await claudeAccountService.selectAccountForApiKey(apiKeyData, null, usedAccountIds);
+            accountId = selection.accountId;
+            poolId = selection.poolId;
+            logger.info(`🔄 Retry ${retryCount}/${maxRetries - 1}: Switching to new account ${accountId}`);
+          }
+        } catch (accountError) {
+          logger.error(`❌ Failed to select account: ${accountError.message}`);
+          
+          // 返回服务不可用错误
+          return {
+            statusCode: 503,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              error: {
+                type: 'service_unavailable',
+                message: 'No available accounts. Please check account configuration.'
+              }
+            })
+          };
         }
         
         // 记录已使用的账户
-        usedAccountIds.add(accountId);
+        if (accountId) {
+          usedAccountIds.add(accountId);
+        }
         
         // 检查熔断器状态
         const circuitCheck = await circuitBreakerService.canRequest(accountId);
@@ -192,10 +211,12 @@ class ClaudeRelayService {
         if (response.statusCode === 429) {
           // 429状态码，需要重试
           logger.warn(`🚫 Rate limit (429) detected for account ${accountId}`);
-          await claudeAccountService.markAccountRateLimited(accountId, sessionHash);
-          // 记录失败到熔断器和恢复服务
-          await circuitBreakerService.recordFailure(accountId, 'HTTP 429 Rate limit');
-          await accountRecoveryService.recordAccountFailure(accountId, new Error('HTTP 429 Rate limit'));
+          if (accountId) {
+            await claudeAccountService.markAccountRateLimited(accountId, sessionHash);
+            // 记录失败到熔断器和恢复服务
+            await circuitBreakerService.recordFailure(accountId, 'HTTP 429 Rate limit');
+            await accountRecoveryService.recordAccountFailure(accountId, new Error('HTTP 429 Rate limit'));
+          }
           lastResponse = response;
           
           // 如果还有重试次数，继续下一次重试
@@ -253,15 +274,17 @@ class ClaudeRelayService {
           
           if (isOrganizationDisabled) {
             logger.error(`🚫 Account ${accountId} has been banned (organization disabled)`);
-            // 标记账号为被封禁
-            await claudeAccountService.updateAccount(accountId, {
-              status: 'banned',
-              errorMessage: 'Organization has been disabled',
-              isActive: false
-            });
-            // 记录失败到熔断器和恢复服务
-            await circuitBreakerService.recordFailure(accountId, 'Organization disabled');
-            await accountRecoveryService.recordAccountFailure(accountId, new Error('Organization disabled'));
+            if (accountId) {
+              // 标记账号为被封禁
+              await claudeAccountService.updateAccount(accountId, {
+                status: 'banned',
+                errorMessage: 'Organization has been disabled',
+                isActive: false
+              });
+              // 记录失败到熔断器和恢复服务
+              await circuitBreakerService.recordFailure(accountId, 'Organization disabled');
+              await accountRecoveryService.recordAccountFailure(accountId, new Error('Organization disabled'));
+            }
             lastResponse = response;
             
             // 如果还有重试次数，切换账号继续重试
@@ -271,11 +294,13 @@ class ClaudeRelayService {
             }
           } else if (isTokenRevoked) {
             logger.warn(`🔐 OAuth token revoked for account ${accountId}`);
-            // 标记账号为不活跃
-            await claudeAccountService.markAccountOAuthRevoked(accountId, 'OAuth token revoked');
-            // 记录失败到熔断器和恢复服务
-            await circuitBreakerService.recordFailure(accountId, 'OAuth token revoked');
-            await accountRecoveryService.recordAccountFailure(accountId, new Error('OAuth token revoked'));
+            if (accountId) {
+              // 标记账号为不活跃
+              await claudeAccountService.markAccountOAuthRevoked(accountId, 'OAuth token revoked');
+              // 记录失败到熔断器和恢复服务
+              await circuitBreakerService.recordFailure(accountId, 'OAuth token revoked');
+              await accountRecoveryService.recordAccountFailure(accountId, new Error('OAuth token revoked'));
+            }
             lastResponse = response;
             
             // 如果还有重试次数，切换账号继续重试
@@ -285,11 +310,13 @@ class ClaudeRelayService {
             }
           } else if (isRateLimited) {
             logger.warn(`🚫 Rate limit detected for account ${accountId}, status: ${response.statusCode}`);
-            // 标记账号为限流状态并删除粘性会话映射
-            await claudeAccountService.markAccountRateLimited(accountId, sessionHash);
-            // 记录失败到熔断器和恢复服务
-            await circuitBreakerService.recordFailure(accountId, 'Rate limit exceeded');
-            await accountRecoveryService.recordAccountFailure(accountId, new Error('Rate limit exceeded'));
+            if (accountId) {
+              // 标记账号为限流状态并删除粘性会话映射
+              await claudeAccountService.markAccountRateLimited(accountId, sessionHash);
+              // 记录失败到熔断器和恢复服务
+              await circuitBreakerService.recordFailure(accountId, 'Rate limit exceeded');
+              await accountRecoveryService.recordAccountFailure(accountId, new Error('Rate limit exceeded'));
+            }
             lastResponse = response;
             
             // 如果还有重试次数，继续下一次重试
@@ -788,9 +815,26 @@ class ClaudeRelayService {
       const sessionHash = sessionHelper.generateSessionHash(requestBody);
       
       // 选择可用的Claude账户（支持专属绑定和sticky会话）
-      const selection = await claudeAccountService.selectAccountForApiKey(apiKeyData, sessionHash);
-      const accountId = selection.accountId;
-      const poolId = selection.poolId;
+      let accountId, poolId;
+      try {
+        const selection = await claudeAccountService.selectAccountForApiKey(apiKeyData, sessionHash);
+        accountId = selection.accountId;
+        poolId = selection.poolId;
+      } catch (accountError) {
+        logger.error(`❌ [Stream] Failed to select account: ${accountError.message}`);
+        
+        // 对于流式响应，需要写入错误并结束流
+        const errorResponse = JSON.stringify({
+          error: {
+            type: 'service_unavailable',
+            message: 'No available accounts. Please check account configuration.'
+          }
+        });
+        
+        responseStream.writeHead(503, { 'Content-Type': 'application/json' });
+        responseStream.end(errorResponse);
+        return;
+      }
       
       // 检查熔断器状态
       const circuitCheck = await circuitBreakerService.canRequest(accountId);
