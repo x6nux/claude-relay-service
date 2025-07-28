@@ -374,6 +374,14 @@ const app = createApp({
             accountCurrentPools: [],
             accountAvailablePools: [],
             
+            // API Key共享池管理
+            showApiKeyPoolsModal: false,
+            currentApiKeyForPools: null,
+            apiKeyCurrentPools: [],
+            apiKeyAvailablePools: [],
+            removeApiKeyFromPoolLoading: {},
+            addApiKeyToPoolLoading: {},
+            
             // 共享池统计相关
             showPoolUsageModal: false,
             poolUsageData: null,
@@ -1565,47 +1573,7 @@ const app = createApp({
             // 如果不是 URL，保持原值（兼容直接输入授权码）
         },
         
-        // 根据当前标签页加载数据
-        loadCurrentTabData() {
-            console.log('Loading current tab data for:', this.activeTab);
-            switch (this.activeTab) {
-                case 'dashboard':
-                    this.loadDashboard();
-                    // 加载图表数据，等待Chart.js
-                    this.waitForChartJS().then(() => {
-                        this.loadDashboardModelStats();
-                        this.loadUsageTrend();
-                        this.loadApiKeysUsageTrend();
-                    });
-                    break;
-                case 'apiKeys':
-                    // 加载API Keys时同时加载账号列表，以便显示绑定账号名称
-                    Promise.all([
-                        this.loadApiKeys(),
-                        this.loadAccounts()
-                    ]);
-                    break;
-                case 'accounts':
-                    // 加载账户时同时加载API Keys，以便正确计算绑定数量
-                    Promise.all([
-                        this.loadAccounts(),
-                        this.loadApiKeys()
-                    ]);
-                    break;
-                case 'models':
-                    this.loadModelStats();
-                    break;
-                case 'tutorial':
-                    // 教程页面不需要加载数据
-                    break;
-                case 'settings':
-                    // OEM 设置已在 mounted 时加载，避免重复加载
-                    if (!this.oemSettings.siteName && !this.oemSettings.siteIcon && !this.oemSettings.siteIconData) {
-                        this.loadOemSettings();
-                    }
-                    break;
-            }
-        },
+        // 注意: loadCurrentTabData 方法已移至后面，避免重复定义
 
         // 等待Chart.js加载完成
         waitForChartJS() {
@@ -4280,21 +4248,46 @@ const app = createApp({
         
         // 加载当前标签页数据
         async loadCurrentTabData() {
+            console.log('Loading current tab data for:', this.activeTab);
             switch (this.activeTab) {
                 case 'dashboard':
                     await this.loadDashboard();
+                    // 加载图表数据，等待Chart.js
+                    this.waitForChartJS().then(() => {
+                        this.loadDashboardModelStats();
+                        this.loadUsageTrend();
+                        this.loadApiKeysUsageTrend();
+                    });
                     break;
                 case 'apiKeys':
-                    await this.loadApiKeys();
+                    // 加载API Keys时同时加载账号列表和共享池列表
+                    await Promise.all([
+                        this.loadApiKeys(),
+                        this.loadAccounts(),
+                        this.loadSharedPools()
+                    ]);
                     break;
                 case 'accounts':
-                    await this.loadAccounts();
+                    // 加载账户时同时加载API Keys，以便正确计算绑定数量
+                    await Promise.all([
+                        this.loadAccounts(),
+                        this.loadApiKeys()
+                    ]);
+                    break;
+                case 'models':
+                    await this.loadModelStats();
                     break;
                 case 'sharedPools':
                     await this.loadSharedPools();
                     break;
+                case 'tutorial':
+                    // 教程页面不需要加载数据
+                    break;
                 case 'settings':
-                    await this.loadOemSettings();
+                    // OEM 设置已在 mounted 时加载，避免重复加载
+                    if (!this.oemSettings.siteName && !this.oemSettings.siteIcon && !this.oemSettings.siteIconData) {
+                        await this.loadOemSettings();
+                    }
                     break;
             }
         },
@@ -4793,6 +4786,153 @@ const app = createApp({
                 this.showToast(error.message || '移除失败', 'error');
             } finally {
                 delete this.removeAccountFromPoolLoading[poolId];
+            }
+        },
+        
+        // ==================== API Key共享池管理方法 ====================
+        
+        // 打开API Key共享池管理模态框
+        async manageApiKeyPools(apiKey) {
+            this.currentApiKeyForPools = apiKey;
+            this.showApiKeyPoolsModal = true;
+            
+            // 加载API Key当前关联的共享池和可用的共享池
+            await this.loadApiKeyPools(apiKey.id);
+        },
+        
+        // 关闭API Key共享池管理模态框
+        closeApiKeyPoolsModal() {
+            this.showApiKeyPoolsModal = false;
+            this.currentApiKeyForPools = null;
+            this.apiKeyCurrentPools = [];
+            this.apiKeyAvailablePools = [];
+        },
+        
+        // 加载API Key的共享池信息
+        async loadApiKeyPools(apiKeyId) {
+            try {
+                // 加载所有共享池
+                const allPoolsResponse = await fetch('/admin/shared-pools', {
+                    headers: {
+                        'Authorization': `Bearer ${this.authToken}`
+                    }
+                });
+                
+                if (!allPoolsResponse.ok) {
+                    throw new Error('加载共享池列表失败');
+                }
+                
+                const allPools = await allPoolsResponse.json();
+                
+                // 获取API Key当前关联的共享池ID
+                const currentPoolIds = this.currentApiKeyForPools.sharedPoolIds || [];
+                
+                // 分离当前关联的和可用的共享池
+                this.apiKeyCurrentPools = [];
+                this.apiKeyAvailablePools = [];
+                
+                for (const pool of allPools) {
+                    if (currentPoolIds.includes(pool.id)) {
+                        this.apiKeyCurrentPools.push(pool);
+                    } else if (pool.isActive) {
+                        this.apiKeyAvailablePools.push(pool);
+                    }
+                }
+                
+                // 按优先级排序
+                this.apiKeyCurrentPools.sort((a, b) => b.priority - a.priority);
+                this.apiKeyAvailablePools.sort((a, b) => b.priority - a.priority);
+            } catch (error) {
+                console.error('加载API Key共享池信息失败:', error);
+                this.showToast('加载API Key共享池信息失败', 'error');
+            }
+        },
+        
+        // 将共享池关联到API Key
+        async addApiKeyToPoolInModal(poolId) {
+            if (!this.currentApiKeyForPools) return;
+            
+            this.addApiKeyToPoolLoading[poolId] = true;
+            try {
+                // 更新API Key的sharedPoolIds
+                const currentPoolIds = this.currentApiKeyForPools.sharedPoolIds || [];
+                const updatedPoolIds = [...currentPoolIds, poolId];
+                
+                const response = await fetch(`/admin/api-keys/${this.currentApiKeyForPools.id}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.authToken}`
+                    },
+                    body: JSON.stringify({ sharedPoolIds: updatedPoolIds })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || '关联失败');
+                }
+                
+                this.showToast('共享池关联成功', 'success');
+                
+                // 更新本地API Key数据
+                this.currentApiKeyForPools.sharedPoolIds = updatedPoolIds;
+                const apiKeyIndex = this.apiKeys.findIndex(k => k.id === this.currentApiKeyForPools.id);
+                if (apiKeyIndex >= 0) {
+                    this.apiKeys[apiKeyIndex].sharedPoolIds = updatedPoolIds;
+                    // 重新加载以获取更新的共享池信息
+                    await this.loadApiKeys();
+                }
+                
+                await this.loadApiKeyPools(this.currentApiKeyForPools.id);
+            } catch (error) {
+                console.error('关联共享池到API Key失败:', error);
+                this.showToast(error.message || '关联失败', 'error');
+            } finally {
+                delete this.addApiKeyToPoolLoading[poolId];
+            }
+        },
+        
+        // 从API Key移除共享池关联
+        async removeApiKeyFromPoolInModal(poolId) {
+            if (!this.currentApiKeyForPools) return;
+            
+            this.removeApiKeyFromPoolLoading[poolId] = true;
+            try {
+                // 更新API Key的sharedPoolIds
+                const currentPoolIds = this.currentApiKeyForPools.sharedPoolIds || [];
+                const updatedPoolIds = currentPoolIds.filter(id => id !== poolId);
+                
+                const response = await fetch(`/admin/api-keys/${this.currentApiKeyForPools.id}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.authToken}`
+                    },
+                    body: JSON.stringify({ sharedPoolIds: updatedPoolIds })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || '移除失败');
+                }
+                
+                this.showToast('共享池移除成功', 'success');
+                
+                // 更新本地API Key数据
+                this.currentApiKeyForPools.sharedPoolIds = updatedPoolIds;
+                const apiKeyIndex = this.apiKeys.findIndex(k => k.id === this.currentApiKeyForPools.id);
+                if (apiKeyIndex >= 0) {
+                    this.apiKeys[apiKeyIndex].sharedPoolIds = updatedPoolIds;
+                    // 重新加载以获取更新的共享池信息
+                    await this.loadApiKeys();
+                }
+                
+                await this.loadApiKeyPools(this.currentApiKeyForPools.id);
+            } catch (error) {
+                console.error('从API Key移除共享池失败:', error);
+                this.showToast(error.message || '移除失败', 'error');
+            } finally {
+                delete this.removeApiKeyFromPoolLoading[poolId];
             }
         }
     }
