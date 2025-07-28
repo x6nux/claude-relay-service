@@ -8,6 +8,7 @@ class SharedPoolService {
     this.POOL_KEY_PREFIX = 'shared_pool:';
     this.POOL_ACCOUNTS_KEY_PREFIX = 'shared_pool_accounts:';
     this.APIKEY_POOLS_KEY_PREFIX = 'apikey_pools:';
+    this.DEFAULT_POOL_ID = 'default-shared-pool';
   }
 
   // 🏊 创建新的共享池
@@ -110,6 +111,76 @@ class SharedPoolService {
       };
     } catch (error) {
       logger.error(`❌ Failed to get pool ${poolId}:`, error);
+      throw error;
+    }
+  }
+
+  // 🏊 获取或创建默认共享池
+  async getOrCreateDefaultPool() {
+    try {
+      const client = redis.getClient();
+      if (!client) return null;
+
+      // 检查默认池是否存在
+      const defaultPool = await this.getPool(this.DEFAULT_POOL_ID);
+      if (defaultPool) {
+        return defaultPool;
+      }
+
+      // 创建默认池
+      const poolData = {
+        id: this.DEFAULT_POOL_ID,
+        name: '默认共享池',
+        description: '系统默认共享池，用于未分配到特定池的API Key',
+        isActive: 'true',
+        priority: '0', // 最低优先级
+        maxConcurrency: '0',
+        accountSelectionStrategy: 'least_used',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      await client.hset(`${this.POOL_KEY_PREFIX}${this.DEFAULT_POOL_ID}`, poolData);
+      
+      // 将未分配到任何池的共享账户添加到默认池
+      const accounts = await redis.getAllClaudeAccounts();
+      const sharedAccounts = accounts.filter(account => 
+        account.accountType === 'shared' && account.isActive === 'true'
+      );
+
+      if (sharedAccounts.length > 0) {
+        // 获取所有非默认池
+        const allPools = await this.getAllPools();
+        const nonDefaultPools = allPools.filter(pool => pool.id !== this.DEFAULT_POOL_ID);
+        
+        // 收集已分配到其他池的账户ID
+        const assignedAccountIds = new Set();
+        for (const pool of nonDefaultPools) {
+          const accountIds = await client.smembers(`${this.POOL_ACCOUNTS_KEY_PREFIX}${pool.id}`);
+          accountIds.forEach(id => assignedAccountIds.add(id));
+        }
+        
+        // 只添加未分配的账户
+        const unassignedAccounts = sharedAccounts.filter(acc => !assignedAccountIds.has(acc.id));
+        if (unassignedAccounts.length > 0) {
+          const accountIds = unassignedAccounts.map(acc => acc.id);
+          await client.sadd(`${this.POOL_ACCOUNTS_KEY_PREFIX}${this.DEFAULT_POOL_ID}`, ...accountIds);
+          logger.info(`🏊 Added ${accountIds.length} unassigned shared accounts to default pool`);
+        }
+      }
+
+      logger.success(`🏊 Created default shared pool`);
+      
+      return {
+        id: this.DEFAULT_POOL_ID,
+        ...poolData,
+        isActive: true,
+        priority: 0,
+        maxConcurrency: 0,
+        accountIds: sharedAccounts.map(acc => acc.id)
+      };
+    } catch (error) {
+      logger.error('❌ Failed to get or create default pool:', error);
       throw error;
     }
   }
@@ -304,10 +375,16 @@ class SharedPoolService {
   async selectAccountFromPools(apiKeyId, sessionHash = null, excludeAccountIds = null) {
     try {
       // 获取API Key关联的所有池（已按优先级排序）
-      const pools = await this.getApiKeyPools(apiKeyId);
+      let pools = await this.getApiKeyPools(apiKeyId);
       
       if (pools.length === 0) {
-        throw new Error('API Key is not associated with any shared pools');
+        // 如果没有关联到任何共享池，使用默认共享池
+        logger.info(`📋 API Key ${apiKeyId} not associated with any pools, using default pool`);
+        const defaultPool = await this.getOrCreateDefaultPool();
+        if (!defaultPool) {
+          throw new Error('Failed to get or create default shared pool');
+        }
+        pools = [defaultPool];
       }
 
       // 按优先级尝试每个池
