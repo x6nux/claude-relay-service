@@ -4822,7 +4822,8 @@ const app = createApp({
                     throw new Error('加载共享池列表失败');
                 }
                 
-                const allPools = await allPoolsResponse.json();
+                const response = await allPoolsResponse.json();
+                const allPools = response.data || [];
                 
                 // 获取API Key当前关联的共享池ID
                 const currentPoolIds = this.currentApiKeyForPools.sharedPoolIds || [];
