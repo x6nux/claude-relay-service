@@ -466,7 +466,7 @@ class SharedPoolService {
           selectedAccountId = await this._selectRoundRobin(pool.id, accountIds, excludeAccountIds);
           break;
         case 'random':
-          selectedAccountId = this._selectRandom(accountIds, excludeAccountIds);
+          selectedAccountId = await this._selectRandom(accountIds, excludeAccountIds);
           break;
         case 'least_used':
         default:
@@ -485,6 +485,8 @@ class SharedPoolService {
   async _selectRoundRobin(poolId, accountIds, excludeAccountIds) {
     const client = redis.getClient();
     if (!client) return null;
+    
+    const claudeAccountService = require('./claudeAccountService');
 
     // 过滤掉排除的账户
     const availableIds = excludeAccountIds 
@@ -493,17 +495,46 @@ class SharedPoolService {
 
     if (availableIds.length === 0) return null;
 
-    // 获取并更新轮询索引
+    // 过滤掉限流和不可用的账户
+    const activeAccountIds = [];
+    for (const accountId of availableIds) {
+      const accountData = await claudeAccountService._getAccountData(accountId);
+      if (accountData && accountData.isActive === 'true' && accountData.status !== 'error' && accountData.status !== 'banned') {
+        // 检查是否被限流
+        const isRateLimited = await claudeAccountService.isAccountRateLimited(accountId);
+        if (!isRateLimited) {
+          activeAccountIds.push(accountId);
+        }
+      }
+    }
+
+    if (activeAccountIds.length === 0) {
+      // 如果所有账户都被限流，则从原始可用账户中选择（作为备用方案）
+      logger.warn(`⚠️ All accounts in pool ${poolId} are rate limited, falling back to original list`);
+      if (availableIds.length === 0) return null;
+      
+      // 获取并更新轮询索引
+      const indexKey = `pool_round_robin:${poolId}`;
+      const currentIndex = parseInt(await client.get(indexKey) || '0');
+      const nextIndex = (currentIndex + 1) % availableIds.length;
+      await client.set(indexKey, nextIndex);
+      
+      return availableIds[currentIndex % availableIds.length];
+    }
+
+    // 获取并更新轮询索引（基于活跃账户列表）
     const indexKey = `pool_round_robin:${poolId}`;
     const currentIndex = parseInt(await client.get(indexKey) || '0');
-    const nextIndex = (currentIndex + 1) % availableIds.length;
+    const nextIndex = (currentIndex + 1) % activeAccountIds.length;
     await client.set(indexKey, nextIndex);
 
-    return availableIds[currentIndex % availableIds.length];
+    return activeAccountIds[currentIndex % activeAccountIds.length];
   }
 
   // 🎲 随机选择策略
-  _selectRandom(accountIds, excludeAccountIds) {
+  async _selectRandom(accountIds, excludeAccountIds) {
+    const claudeAccountService = require('./claudeAccountService');
+    
     // 过滤掉排除的账户
     const availableIds = excludeAccountIds 
       ? accountIds.filter(id => !excludeAccountIds.has(id))
@@ -511,8 +542,29 @@ class SharedPoolService {
 
     if (availableIds.length === 0) return null;
 
-    const randomIndex = Math.floor(Math.random() * availableIds.length);
-    return availableIds[randomIndex];
+    // 过滤掉限流和不可用的账户
+    const activeAccountIds = [];
+    for (const accountId of availableIds) {
+      const accountData = await claudeAccountService._getAccountData(accountId);
+      if (accountData && accountData.isActive === 'true' && accountData.status !== 'error' && accountData.status !== 'banned') {
+        // 检查是否被限流
+        const isRateLimited = await claudeAccountService.isAccountRateLimited(accountId);
+        if (!isRateLimited) {
+          activeAccountIds.push(accountId);
+        }
+      }
+    }
+
+    if (activeAccountIds.length === 0) {
+      // 如果所有账户都被限流，则从原始可用账户中选择（作为备用方案）
+      logger.warn(`⚠️ All accounts are rate limited in random selection, falling back to original list`);
+      if (availableIds.length === 0) return null;
+      const randomIndex = Math.floor(Math.random() * availableIds.length);
+      return availableIds[randomIndex];
+    }
+
+    const randomIndex = Math.floor(Math.random() * activeAccountIds.length);
+    return activeAccountIds[randomIndex];
   }
 
   // 📊 最少使用选择策略
