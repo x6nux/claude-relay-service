@@ -404,6 +404,18 @@ async function deleteAccount(accountId) {
     }
   }
   
+  // 清理共享池中的账户引用
+  const poolAccountKeys = await client.keys('shared_pool_accounts:*');
+  
+  // 从每个共享池中移除该账户
+  for (const key of poolAccountKeys) {
+    const removed = await client.srem(key, accountId);
+    if (removed > 0) {
+      const poolId = key.replace('shared_pool_accounts:', '');
+      logger.info(`🧹 Removed Gemini account ${accountId} from shared pool ${poolId}`);
+    }
+  }
+  
   logger.info(`Deleted Gemini account: ${accountId}`);
   return true;
 }

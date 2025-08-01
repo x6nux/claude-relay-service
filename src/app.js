@@ -377,6 +377,9 @@ class Application {
       // 🔄 定期清理任务
       this.startCleanupTasks();
       
+      // 🏊 启动共享池维护任务
+      this.startSharedPoolMaintenance();
+      
       // 🛑 优雅关闭
       this.setupGracefulShutdown();
       
@@ -409,6 +412,21 @@ class Application {
     }, config.system.cleanupInterval);
 
     logger.info(`🔄 Cleanup tasks scheduled every ${config.system.cleanupInterval / 1000 / 60} minutes`);
+  }
+
+  startSharedPoolMaintenance() {
+    try {
+      const sharedPoolMaintenanceService = require('./services/sharedPoolMaintenanceService');
+      
+      // 启动定时维护任务（默认每6小时运行一次）
+      const cronExpression = config.sharedPoolMaintenance?.cronExpression || '0 */6 * * *';
+      sharedPoolMaintenanceService.startMaintenanceSchedule(cronExpression);
+      
+      logger.info(`🏊 Shared pool maintenance scheduled with cron: ${cronExpression}`);
+    } catch (error) {
+      logger.error('❌ Failed to start shared pool maintenance:', error);
+      // 不影响主服务启动
+    }
   }
 
   setupGracefulShutdown() {

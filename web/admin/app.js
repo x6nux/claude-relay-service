@@ -390,7 +390,22 @@ const app = createApp({
             poolAccountsUsage: [],
             poolAccountsUsageLoading: false,
             poolUsageTab: 'total', // total, daily, monthly
-            poolUsageCustomDate: null // 自定义日期
+            poolUsageCustomDate: null, // 自定义日期
+            
+            // 账号错误统计相关
+            showErrorDetailsModal: false,
+            selectedAccountForError: null,
+            accountErrorHistory: [],
+            errorHistoryLoading: false,
+            clearingErrorStats: false,
+            
+            // 编辑账号 OAuth 相关
+            editOauthData: {
+                sessionId: '',
+                authUrl: '',
+                callbackUrl: ''
+            },
+            editAuthUrlLoading: false
         }
     },
     
@@ -604,6 +619,128 @@ const app = createApp({
                 this.accountsSortBy = field;
                 this.accountsSortOrder = 'asc';
             }
+        },
+        
+        // 显示账号错误详情
+        async showAccountErrorDetails(account) {
+            this.selectedAccountForError = account;
+            this.showErrorDetailsModal = true;
+            await this.loadAccountErrorHistory();
+        },
+        
+        // 加载账号错误历史
+        async loadAccountErrorHistory() {
+            if (!this.selectedAccountForError) return;
+            
+            this.errorHistoryLoading = true;
+            try {
+                const response = await fetch(`/admin/claude-accounts/${this.selectedAccountForError.id}/error-history`, {
+                    headers: { 'Authorization': 'Bearer ' + this.authToken }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success) {
+                        this.accountErrorHistory = data.data || [];
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to load error history:', error);
+                this.showToast('加载错误历史失败', 'error');
+            } finally {
+                this.errorHistoryLoading = false;
+            }
+        },
+        
+        // 清除账号错误统计
+        async clearAccountErrorStats() {
+            if (!this.selectedAccountForError) return;
+            
+            const confirmed = await this.confirm('确定要清除这个账号的所有错误统计吗？', '清除错误统计');
+            if (!confirmed) return;
+            
+            this.clearingErrorStats = true;
+            try {
+                const response = await fetch(`/admin/claude-accounts/${this.selectedAccountForError.id}/clear-error-stats`, {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + this.authToken }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success) {
+                        this.showToast('错误统计已清除', 'success');
+                        this.showErrorDetailsModal = false;
+                        await this.loadAccounts(); // 重新加载账号列表以更新统计
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to clear error stats:', error);
+                this.showToast('清除错误统计失败', 'error');
+            } finally {
+                this.clearingErrorStats = false;
+            }
+        },
+        
+        // 解禁账号
+        async unbanAccount(account) {
+            if (!account) return;
+            
+            try {
+                const response = await fetch(`/admin/claude-accounts/${account.id}/unban`, {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + this.authToken }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success) {
+                        this.showToast('账号已解禁', 'success');
+                        await this.loadAccounts(); // 重新加载账号列表
+                    }
+                } else {
+                    const error = await response.json();
+                    this.showToast(error.error || '解禁失败', 'error');
+                }
+            } catch (error) {
+                console.error('Failed to unban account:', error);
+                this.showToast('解禁账号失败', 'error');
+            }
+        },
+        
+        // 获取错误代码描述
+        getErrorDescription(code) {
+            const descriptions = {
+                '400': '请求错误',
+                '401': '未授权',
+                '403': '禁止访问',
+                '404': '未找到',
+                '429': '请求过多',
+                '500': '服务器错误',
+                '502': '网关错误',
+                '503': '服务不可用',
+                '504': '网关超时',
+                'ECONNABORTED': '连接中断',
+                'ETIMEDOUT': '连接超时',
+                'ENOTFOUND': 'DNS查找失败',
+                'ECONNREFUSED': '连接被拒绝',
+                'ECONNRESET': '连接重置',
+                'rate_limit': '限流',
+                'unauthorized': '认证失败',
+                'server_error': '服务器错误',
+                'timeout': '请求超时',
+                'network_error': '网络错误',
+                'invalid_response': '无效响应'
+            };
+            
+            return descriptions[code] || code;
+        },
+        
+        // 关闭错误详情弹窗
+        closeErrorDetailsModal() {
+            this.showErrorDetailsModal = false;
+            this.selectedAccountForError = null;
+            this.accountErrorHistory = [];
         },
         
         // API Keys列表排序

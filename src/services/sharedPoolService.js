@@ -653,6 +653,97 @@ class SharedPoolService {
       return 0;
     }
   }
+
+  // 🧹 清理共享池中的无效账户
+  async cleanupInvalidAccountsInPools() {
+    try {
+      const client = redis.getClient();
+      if (!client) return { cleaned: 0, errors: [] };
+
+      const claudeAccountService = require('./claudeAccountService');
+      const geminiAccountService = require('./geminiAccountService');
+      
+      let totalCleaned = 0;
+      const errors = [];
+      
+      // 获取所有共享池
+      const poolKeys = await client.keys(`${this.POOL_ACCOUNTS_KEY_PREFIX}*`);
+      
+      for (const poolKey of poolKeys) {
+        const poolId = poolKey.replace(this.POOL_ACCOUNTS_KEY_PREFIX, '');
+        const accountIds = await client.smembers(poolKey);
+        
+        if (accountIds.length === 0) continue;
+        
+        logger.info(`🔍 Checking pool ${poolId} with ${accountIds.length} accounts`);
+        
+        // 检查每个账户是否存在
+        for (const accountId of accountIds) {
+          try {
+            // 尝试获取 Claude 账户
+            const claudeAccount = await claudeAccountService.getAccount(accountId);
+            if (claudeAccount) continue; // 账户存在，跳过
+            
+            // 尝试获取 Gemini 账户
+            const geminiAccount = await geminiAccountService.getAccount(accountId);
+            if (geminiAccount) continue; // 账户存在，跳过
+            
+            // 账户不存在，从池中移除
+            const removed = await client.srem(poolKey, accountId);
+            if (removed > 0) {
+              totalCleaned++;
+              logger.info(`🧹 Removed invalid account ${accountId} from pool ${poolId}`);
+            }
+          } catch (error) {
+            // 账户不存在或获取失败，从池中移除
+            const removed = await client.srem(poolKey, accountId);
+            if (removed > 0) {
+              totalCleaned++;
+              logger.info(`🧹 Removed invalid account ${accountId} from pool ${poolId}`);
+            }
+          }
+        }
+      }
+      
+      if (totalCleaned > 0) {
+        logger.success(`✅ Cleaned ${totalCleaned} invalid accounts from shared pools`);
+      } else {
+        logger.info('✅ All accounts in shared pools are valid');
+      }
+      
+      return { cleaned: totalCleaned, errors };
+    } catch (error) {
+      logger.error('❌ Failed to cleanup invalid accounts in pools:', error);
+      return { cleaned: 0, errors: [error.message] };
+    }
+  }
+
+  // 🔄 执行完整的共享池维护（包括清理无效关联和无效账户）
+  async performPoolMaintenance() {
+    try {
+      logger.info('🔧 Starting shared pool maintenance...');
+      
+      // 清理无效关联
+      const associationsCleaned = await this.cleanupInvalidAssociations();
+      
+      // 清理无效账户
+      const { cleaned: accountsCleaned, errors } = await this.cleanupInvalidAccountsInPools();
+      
+      const results = {
+        associationsCleaned,
+        accountsCleaned,
+        errors,
+        timestamp: new Date().toISOString()
+      };
+      
+      logger.success(`✅ Pool maintenance completed: ${associationsCleaned} associations, ${accountsCleaned} accounts cleaned`);
+      
+      return results;
+    } catch (error) {
+      logger.error('❌ Failed to perform pool maintenance:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = new SharedPoolService();

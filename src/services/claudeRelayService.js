@@ -11,6 +11,9 @@ const config = require('../../config/config');
 const claudeCodeHeadersService = require('./claudeCodeHeadersService');
 const circuitBreakerService = require('./circuitBreakerService');
 const accountRecoveryService = require('./accountRecoveryService');
+const accountTempBanService = require('./accountTempBanService');
+const sharedPoolService = require('./sharedPoolService');
+const accountErrorStatsService = require('./accountErrorStatsService');
 
 class ClaudeRelayService {
   constructor() {
@@ -56,14 +59,156 @@ class ClaudeRelayService {
     return false;
   }
 
+  // 🔍 获取所有可用账号
+  async _getAllAvailableAccounts(apiKeyData, sessionHash) {
+    try {
+      // 如果是专属账号绑定，只返回绑定的账号
+      if (apiKeyData.dedicatedClaudeAccountId) {
+        const account = await claudeAccountService.getAccount(apiKeyData.dedicatedClaudeAccountId);
+        if (account && account.isActive && account.status === 'active') {
+          const banStatus = await accountTempBanService.isAccountBanned(account.id);
+          if (!banStatus.isBanned) {
+            return [account.id];
+          }
+        }
+        return [];
+      }
+      
+      // 否则从共享池获取账号
+      const selection = await sharedPoolService.selectAccountFromPools(apiKeyData.id, sessionHash);
+      if (!selection || !selection.accountId) {
+        return [];
+      }
+      
+      // 获取池中的所有账号
+      const poolAccounts = await sharedPoolService.getPoolAccounts(selection.poolId);
+      const validAccounts = [];
+      
+      for (const accId of poolAccounts) {
+        const account = await claudeAccountService.getAccount(accId);
+        if (account && account.isActive && account.status === 'active') {
+          const banStatus = await accountTempBanService.isAccountBanned(accId);
+          const circuitCheck = await circuitBreakerService.canRequest(accId);
+          
+          if (!banStatus.isBanned && circuitCheck.allowed) {
+            validAccounts.push(accId);
+          }
+        }
+      }
+      
+      return validAccounts;
+    } catch (error) {
+      logger.error('❌ Failed to get available accounts:', error);
+      return [];
+    }
+  }
+
+  // 🎯 选择下一个可用账号
+  async _selectNextAvailableAccount(apiKeyData, sessionHash, usedAccountIds, retryCount) {
+    try {
+      // 专属账号模式
+      if (apiKeyData.dedicatedClaudeAccountId) {
+        const accountId = apiKeyData.dedicatedClaudeAccountId;
+        
+        // 检查是否已经使用过
+        if (usedAccountIds.has(accountId)) {
+          return { accountId: null, poolId: null };
+        }
+        
+        // 检查账号状态
+        const account = await claudeAccountService.getAccount(accountId);
+        if (!account || !account.isActive || account.status !== 'active') {
+          return { accountId: null, poolId: null };
+        }
+        
+        // 检查临时禁用状态
+        const banStatus = await accountTempBanService.isAccountBanned(accountId);
+        if (banStatus.isBanned) {
+          logger.warn(`🚫 Account ${accountId} is temporarily banned until ${banStatus.expiresAt}`);
+          return { accountId: null, poolId: null };
+        }
+        
+        // 检查熔断器状态
+        const circuitCheck = await circuitBreakerService.canRequest(accountId);
+        if (!circuitCheck.allowed) {
+          logger.warn(`🚫 Circuit breaker OPEN for account ${accountId}`);
+          return { accountId: null, poolId: null };
+        }
+        
+        return { accountId, poolId: null };
+      }
+      
+      // 共享池模式：获取一个未使用的账号
+      let selection;
+      if (retryCount === 0) {
+        // 第一次尝试，使用 sticky session
+        selection = await claudeAccountService.selectAccountForApiKey(apiKeyData, sessionHash);
+      } else {
+        // 重试时，排除已使用的账号
+        selection = await claudeAccountService.selectAccountForApiKey(apiKeyData, null, usedAccountIds);
+      }
+      
+      if (!selection || !selection.accountId) {
+        return { accountId: null, poolId: null };
+      }
+      
+      // 检查是否已经使用过
+      if (usedAccountIds.has(selection.accountId)) {
+        // 继续尝试其他账号
+        const allAccounts = await this._getAllAvailableAccounts(apiKeyData, sessionHash);
+        for (const accId of allAccounts) {
+          if (!usedAccountIds.has(accId)) {
+            const banStatus = await accountTempBanService.isAccountBanned(accId);
+            const circuitCheck = await circuitBreakerService.canRequest(accId);
+            
+            if (!banStatus.isBanned && circuitCheck.allowed) {
+              return { accountId: accId, poolId: selection.poolId };
+            }
+          }
+        }
+        return { accountId: null, poolId: null };
+      }
+      
+      // 检查临时禁用状态
+      const banStatus = await accountTempBanService.isAccountBanned(selection.accountId);
+      if (banStatus.isBanned) {
+        logger.warn(`🚫 Account ${selection.accountId} is temporarily banned until ${banStatus.expiresAt}`);
+        usedAccountIds.add(selection.accountId); // 标记为已使用
+        // 递归尝试下一个账号
+        return this._selectNextAvailableAccount(apiKeyData, sessionHash, usedAccountIds, retryCount + 1);
+      }
+      
+      // 检查熔断器状态
+      const circuitCheck = await circuitBreakerService.canRequest(selection.accountId);
+      if (!circuitCheck.allowed) {
+        logger.warn(`🚫 Circuit breaker OPEN for account ${selection.accountId}`);
+        usedAccountIds.add(selection.accountId); // 标记为已使用
+        // 递归尝试下一个账号
+        return this._selectNextAvailableAccount(apiKeyData, sessionHash, usedAccountIds, retryCount + 1);
+      }
+      
+      return { accountId: selection.accountId, poolId: selection.poolId };
+    } catch (error) {
+      logger.error('❌ Failed to select next available account:', error);
+      return { accountId: null, poolId: null };
+    }
+  }
+
   // 🚀 转发请求到Claude API
   async relayRequest(requestBody, apiKeyData, clientRequest, clientResponse, clientHeaders, options = {}) {
-    const maxRetries = options.maxRetries || 3; // 默认重试3次
     let lastResponse = null;
     let lastError = null;
-    let usedAccountIds = new Set(); // 记录已使用的账户ID，避免重复使用
+    const usedAccountIds = new Set(); // 记录已使用的账户ID，避免重复使用
+    const sessionHash = sessionHelper.getSessionHash(clientRequest);
+    let retryCount = 0;
     
-    for (let retryCount = 0; retryCount < maxRetries; retryCount++) {
+    // 获取所有可用账号
+    const allAccountIds = await this._getAllAvailableAccounts(apiKeyData, sessionHash);
+    const maxRetries = Math.min(allAccountIds.length, options.maxRetries || allAccountIds.length || 3);
+    
+    logger.info(`🔄 Total available accounts: ${allAccountIds.length}, max retries: ${maxRetries}`);
+    
+    while (retryCount < maxRetries) {
       let upstreamRequest = null;
       let accountId = null;
       let poolId = null;
@@ -101,8 +246,6 @@ class ClaudeRelayService {
           }
         }
         
-        // 生成会话哈希用于sticky会话
-        const sessionHash = sessionHelper.generateSessionHash(requestBody);
         
         // 选择可用的Claude账户（支持专属绑定和sticky会话）
         try {
@@ -216,6 +359,8 @@ class ClaudeRelayService {
             // 记录失败到熔断器和恢复服务
             await circuitBreakerService.recordFailure(accountId, 'HTTP 429 Rate limit');
             await accountRecoveryService.recordAccountFailure(accountId, new Error('HTTP 429 Rate limit'));
+            // 记录错误统计
+            await accountErrorStatsService.recordError(accountId, '429', 'Rate limit exceeded');
           }
           lastResponse = response;
           
@@ -284,12 +429,18 @@ class ClaudeRelayService {
               // 记录失败到熔断器和恢复服务
               await circuitBreakerService.recordFailure(accountId, 'Organization disabled');
               await accountRecoveryService.recordAccountFailure(accountId, new Error('Organization disabled'));
+              // 记录错误统计
+              await accountErrorStatsService.recordError(accountId, '403', 'Organization disabled');
             }
             lastResponse = response;
             
-            // 如果还有重试次数，切换账号继续重试
+            // 自动禁用账号
+            await accountTempBanService.banAccount(accountId, 'unauthorized');
+            
+            // 立即切换账号继续重试，无需延迟
             if (retryCount < maxRetries - 1) {
               logger.info(`🔄 Account banned, switching to a different account...`);
+              retryCount++;
               continue;
             }
           } else if (isTokenRevoked) {
@@ -300,12 +451,18 @@ class ClaudeRelayService {
               // 记录失败到熔断器和恢复服务
               await circuitBreakerService.recordFailure(accountId, 'OAuth token revoked');
               await accountRecoveryService.recordAccountFailure(accountId, new Error('OAuth token revoked'));
+              // 记录错误统计
+              await accountErrorStatsService.recordError(accountId, '401', 'OAuth token revoked');
             }
             lastResponse = response;
             
-            // 如果还有重试次数，切换账号继续重试
+            // 自动禁用账号
+            await accountTempBanService.banAccount(accountId, 'unauthorized');
+            
+            // 立即切换账号继续重试，无需延违
             if (retryCount < maxRetries - 1) {
               logger.info(`🔄 OAuth token revoked, switching to a different account...`);
+              retryCount++;
               continue;
             }
           } else if (isRateLimited) {
@@ -316,14 +473,17 @@ class ClaudeRelayService {
               // 记录失败到熔断器和恢复服务
               await circuitBreakerService.recordFailure(accountId, 'Rate limit exceeded');
               await accountRecoveryService.recordAccountFailure(accountId, new Error('Rate limit exceeded'));
+              // 记录错误统计
+              await accountErrorStatsService.recordError(accountId, response.statusCode.toString(), 'Rate limit exceeded');
             }
             lastResponse = response;
             
-            // 如果还有重试次数，继续下一次重试
+            // 自动禁用账号
+            await accountTempBanService.banAccount(accountId, 'rate_limit');
+            
+            // 立即切换账号继续重试，无需延迟
             if (retryCount < maxRetries - 1) {
-              const delay = Math.min(1000 * Math.pow(2, retryCount), 10000);
-              logger.info(`⏳ Waiting ${delay}ms before retry...`);
-              await new Promise(resolve => setTimeout(resolve, delay));
+              retryCount++;
               continue;
             }
           }
@@ -362,7 +522,19 @@ class ClaudeRelayService {
           return response;
         }
         
-        // 其他错误，直接返回
+        // 其他非2xx错误
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          logger.warn(`⚠️ Non-2xx response ${response.statusCode} for account ${accountId}`);
+          if (accountId) {
+            // 记录错误统计
+            await accountErrorStatsService.recordError(
+              accountId, 
+              response.statusCode.toString(), 
+              `HTTP ${response.statusCode} response`
+            );
+          }
+        }
+        
         lastResponse = response;
         break;
         
@@ -374,13 +546,26 @@ class ClaudeRelayService {
         if (accountId) {
           await circuitBreakerService.recordFailure(accountId, error.message);
           await accountRecoveryService.recordAccountFailure(accountId, error);
+          
+          // 检查是否应该禁用账号
+          const { shouldBan, reason } = accountTempBanService.shouldBanAccount(error, error.response);
+          if (shouldBan) {
+            await accountTempBanService.banAccount(accountId, reason);
+          }
+          
+          // 记录错误统计
+          const errorCode = error.response?.status || error.code || 'UNKNOWN';
+          await accountErrorStatsService.recordError(accountId, errorCode.toString(), error.message);
         }
         
-        // 如果还有重试次数，继续下一次重试
+        // 清理资源
+        if (upstreamRequest && !upstreamRequest.destroyed) {
+          upstreamRequest.destroy();
+        }
+        
+        // 立即切换到下一个账号，无需延迟
         if (retryCount < maxRetries - 1) {
-          const delay = Math.min(1000 * Math.pow(2, retryCount), 10000);
-          logger.info(`⏳ Waiting ${delay}ms before retry...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
+          retryCount++;
           continue;
         }
       }

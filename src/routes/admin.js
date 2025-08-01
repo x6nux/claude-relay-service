@@ -10,6 +10,8 @@ const CostCalculator = require('../utils/costCalculator');
 const pricingService = require('../services/pricingService');
 const claudeCodeHeadersService = require('../services/claudeCodeHeadersService');
 const accountHealthCheckService = require('../services/accountHealthCheckService');
+const accountErrorStatsService = require('../services/accountErrorStatsService');
+const accountTempBanService = require('../services/accountTempBanService');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
@@ -652,20 +654,41 @@ router.get('/claude-accounts', authenticateAdmin, async (req, res) => {
   try {
     const accounts = await claudeAccountService.getAllAccounts();
     
-    // 为每个账户添加使用统计信息
+    // 为每个账户添加使用统计和错误统计信息
     const accountsWithStats = await Promise.all(accounts.map(async (account) => {
       try {
+        // 获取使用统计
         const usageStats = await redis.getAccountUsageStats(account.id);
+        
+        // 获取错误统计
+        const errorStats = await accountErrorStatsService.getErrorStats(account.id);
+        
+        // 获取临时禁用状态
+        const banStatus = await accountTempBanService.isAccountBanned(account.id);
+        
         return {
           ...account,
           usage: {
             daily: usageStats.daily,
             total: usageStats.total,
             averages: usageStats.averages
-          }
+          },
+          errorStats: {
+            totalErrors: errorStats.totalErrors,
+            lastErrorTime: errorStats.lastErrorTime,
+            lastErrorCode: errorStats.lastErrorCode,
+            lastErrorMessage: errorStats.lastErrorMessage,
+            errorBreakdown: errorStats.errorBreakdown
+          },
+          tempBan: banStatus.isBanned ? {
+            isBanned: true,
+            reason: banStatus.reason,
+            expiresAt: banStatus.expiresAt,
+            remainingSeconds: banStatus.remainingSeconds
+          } : null
         };
       } catch (statsError) {
-        logger.warn(`⚠️ Failed to get usage stats for account ${account.id}:`, statsError.message);
+        logger.warn(`⚠️ Failed to get stats for account ${account.id}:`, statsError.message);
         // 如果获取统计失败，返回空统计
         return {
           ...account,
@@ -673,7 +696,15 @@ router.get('/claude-accounts', authenticateAdmin, async (req, res) => {
             daily: { tokens: 0, requests: 0, allTokens: 0 },
             total: { tokens: 0, requests: 0, allTokens: 0 },
             averages: { rpm: 0, tpm: 0 }
-          }
+          },
+          errorStats: {
+            totalErrors: 0,
+            lastErrorTime: null,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            errorBreakdown: {}
+          },
+          tempBan: null
         };
       }
     }));
@@ -755,6 +786,57 @@ router.delete('/claude-accounts/:accountId', authenticateAdmin, async (req, res)
   } catch (error) {
     logger.error('❌ Failed to delete Claude account:', error);
     res.status(500).json({ error: 'Failed to delete Claude account', message: error.message });
+  }
+});
+
+// 获取账号错误历史
+router.get('/claude-accounts/:accountId/error-history', authenticateAdmin, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const { limit = 20 } = req.query;
+    
+    const errorHistory = await accountErrorStatsService.getErrorHistory(accountId, parseInt(limit));
+    
+    res.json({ 
+      success: true, 
+      data: errorHistory.map(err => ({
+        ...err,
+        description: accountErrorStatsService.getErrorDescription(err.code)
+      }))
+    });
+  } catch (error) {
+    logger.error('❌ Failed to get error history:', error);
+    res.status(500).json({ error: 'Failed to get error history', message: error.message });
+  }
+});
+
+// 清除账号错误统计
+router.delete('/claude-accounts/:accountId/error-stats', authenticateAdmin, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    
+    await accountErrorStatsService.clearErrorStats(accountId);
+    
+    logger.success(`🧹 Admin cleared error stats for account: ${accountId}`);
+    res.json({ success: true, message: 'Error stats cleared successfully' });
+  } catch (error) {
+    logger.error('❌ Failed to clear error stats:', error);
+    res.status(500).json({ error: 'Failed to clear error stats', message: error.message });
+  }
+});
+
+// 解除账号临时禁用
+router.post('/claude-accounts/:accountId/unban', authenticateAdmin, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    
+    await accountTempBanService.unbanAccount(accountId);
+    
+    logger.success(`🔓 Admin unbanned account: ${accountId}`);
+    res.json({ success: true, message: 'Account unbanned successfully' });
+  } catch (error) {
+    logger.error('❌ Failed to unban account:', error);
+    res.status(500).json({ error: 'Failed to unban account', message: error.message });
   }
 });
 
@@ -923,13 +1005,54 @@ router.get('/gemini-accounts', authenticateAdmin, async (req, res) => {
   try {
     const accounts = await geminiAccountService.getAllAccounts();
     
-    // 为Gemini账户添加空的使用统计（暂时）
-    const accountsWithStats = accounts.map(account => ({
-      ...account,
-      usage: {
-        daily: { tokens: 0, requests: 0, allTokens: 0 },
-        total: { tokens: 0, requests: 0, allTokens: 0 },
-        averages: { rpm: 0, tpm: 0 }
+    // 为Gemini账户添加错误统计信息
+    const accountsWithStats = await Promise.all(accounts.map(async (account) => {
+      try {
+        // 获取错误统计
+        const errorStats = await accountErrorStatsService.getErrorStats(account.id);
+        
+        // 获取临时禁用状态
+        const banStatus = await accountTempBanService.isAccountBanned(account.id);
+        
+        return {
+          ...account,
+          usage: {
+            daily: { tokens: 0, requests: 0, allTokens: 0 },
+            total: { tokens: 0, requests: 0, allTokens: 0 },
+            averages: { rpm: 0, tpm: 0 }
+          },
+          errorStats: {
+            totalErrors: errorStats.totalErrors,
+            lastErrorTime: errorStats.lastErrorTime,
+            lastErrorCode: errorStats.lastErrorCode,
+            lastErrorMessage: errorStats.lastErrorMessage,
+            errorBreakdown: errorStats.errorBreakdown
+          },
+          tempBan: banStatus.isBanned ? {
+            isBanned: true,
+            reason: banStatus.reason,
+            expiresAt: banStatus.expiresAt,
+            remainingSeconds: banStatus.remainingSeconds
+          } : null
+        };
+      } catch (statsError) {
+        logger.warn(`⚠️ Failed to get stats for Gemini account ${account.id}:`, statsError.message);
+        return {
+          ...account,
+          usage: {
+            daily: { tokens: 0, requests: 0, allTokens: 0 },
+            total: { tokens: 0, requests: 0, allTokens: 0 },
+            averages: { rpm: 0, tpm: 0 }
+          },
+          errorStats: {
+            totalErrors: 0,
+            lastErrorTime: null,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            errorBreakdown: {}
+          },
+          tempBan: null
+        };
       }
     }));
     
@@ -2585,6 +2708,36 @@ router.get('/api-keys/:keyId/pools', authenticateAdmin, async (req, res) => {
   } catch (error) {
     logger.error('❌ Failed to get API key pools:', error);
     res.status(500).json({ error: 'Failed to get API key pools', message: error.message });
+  }
+});
+
+// 手动触发共享池维护
+router.post('/shared-pools/maintenance', authenticateAdmin, async (req, res) => {
+  try {
+    const sharedPoolMaintenanceService = require('../services/sharedPoolMaintenanceService');
+    
+    // 异步执行维护，不等待完成
+    sharedPoolMaintenanceService.triggerManualMaintenance().catch(error => {
+      logger.error('❌ Manual pool maintenance failed:', error);
+    });
+    
+    res.json({ success: true, message: 'Pool maintenance started' });
+  } catch (error) {
+    logger.error('❌ Failed to trigger pool maintenance:', error);
+    res.status(500).json({ error: 'Failed to trigger pool maintenance', message: error.message });
+  }
+});
+
+// 获取共享池维护状态
+router.get('/shared-pools/maintenance/status', authenticateAdmin, async (req, res) => {
+  try {
+    const sharedPoolMaintenanceService = require('../services/sharedPoolMaintenanceService');
+    const status = sharedPoolMaintenanceService.getMaintenanceStatus();
+    
+    res.json({ success: true, data: status });
+  } catch (error) {
+    logger.error('❌ Failed to get maintenance status:', error);
+    res.status(500).json({ error: 'Failed to get maintenance status', message: error.message });
   }
 });
 
