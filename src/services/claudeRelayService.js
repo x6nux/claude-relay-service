@@ -65,7 +65,8 @@ class ClaudeRelayService {
       // 如果是专属账号绑定，只返回绑定的账号
       if (apiKeyData.dedicatedClaudeAccountId) {
         const account = await claudeAccountService.getAccount(apiKeyData.dedicatedClaudeAccountId);
-        if (account && account.isActive && account.status === 'active') {
+        // 只检查 isActive，不限制 status - 让实际使用来决定账号是否可用
+        if (account && account.isActive) {
           const banStatus = await accountTempBanService.isAccountBanned(account.id);
           if (!banStatus.isBanned) {
             return [account.id];
@@ -75,7 +76,14 @@ class ClaudeRelayService {
       }
       
       // 否则从共享池获取账号
-      const selection = await sharedPoolService.selectAccountFromPools(apiKeyData.id, sessionHash);
+      let selection;
+      try {
+        selection = await sharedPoolService.selectAccountFromPools(apiKeyData.id, sessionHash);
+      } catch (poolError) {
+        logger.warn(`⚠️ Failed to select from pools: ${poolError.message}`);
+        return [];
+      }
+      
       if (!selection || !selection.accountId) {
         return [];
       }
@@ -86,7 +94,8 @@ class ClaudeRelayService {
       
       for (const accId of poolAccounts) {
         const account = await claudeAccountService.getAccount(accId);
-        if (account && account.isActive && account.status === 'active') {
+        // 只检查 isActive，不限制 status - 让实际使用来决定账号是否可用
+        if (account && account.isActive) {
           const banStatus = await accountTempBanService.isAccountBanned(accId);
           const circuitCheck = await circuitBreakerService.canRequest(accId);
           
@@ -204,6 +213,22 @@ class ClaudeRelayService {
     
     // 获取所有可用账号
     const allAccountIds = await this._getAllAvailableAccounts(apiKeyData, sessionHash);
+    
+    // 如果没有可用账号，直接返回错误
+    if (allAccountIds.length === 0) {
+      logger.error(`❌ No available accounts for API key: ${apiKeyData.name}`);
+      return {
+        statusCode: 503,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          error: {
+            type: 'service_unavailable',
+            message: 'No available accounts. All accounts may be disabled, banned, or rate limited.'
+          }
+        })
+      };
+    }
+    
     const maxRetries = Math.min(allAccountIds.length, options.maxRetries || allAccountIds.length || 3);
     
     logger.info(`🔄 Total available accounts: ${allAccountIds.length}, max retries: ${maxRetries}`);

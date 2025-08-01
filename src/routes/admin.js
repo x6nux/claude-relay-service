@@ -2620,7 +2620,9 @@ router.post('/shared-pools/:poolId/accounts', authenticateAdmin, async (req, res
     }
     
     const sharedPoolService = require('../services/sharedPoolService');
-    await sharedPoolService.addAccountToPool(poolId, accountId);
+    // 管理员手动添加账号到池时，标记为显式添加
+    const isExplicitAdd = true;
+    await sharedPoolService.addAccountToPool(poolId, accountId, isExplicitAdd);
     
     logger.success(`➕ Admin added account ${accountId} to pool ${poolId}`);
     res.json({ success: true, message: 'Account added to pool successfully' });

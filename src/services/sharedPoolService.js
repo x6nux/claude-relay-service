@@ -262,7 +262,7 @@ class SharedPoolService {
   }
 
   // ➕ 添加账户到共享池
-  async addAccountToPool(poolId, accountId) {
+  async addAccountToPool(poolId, accountId, isExplicitAdd = false) {
     try {
       const client = redis.getClientSafe();
       
@@ -274,6 +274,20 @@ class SharedPoolService {
       
       // 添加账户到池
       await client.sadd(`${this.POOL_ACCOUNTS_KEY_PREFIX}${poolId}`, accountId);
+      
+      // 如果添加到非默认池，且不是显式添加，则从默认池中移除
+      const defaultPool = await this.getDefaultPool();
+      if (defaultPool && poolId !== defaultPool.id && !isExplicitAdd) {
+        const isInDefaultPool = await client.sismember(
+          `${this.POOL_ACCOUNTS_KEY_PREFIX}${defaultPool.id}`,
+          accountId
+        );
+        
+        if (isInDefaultPool) {
+          await this.removeAccountFromPool(defaultPool.id, accountId);
+          logger.info(`🔄 Auto-removed account ${accountId} from default pool as it was added to pool ${poolId}`);
+        }
+      }
       
       logger.success(`➕ Added account ${accountId} to pool ${poolId}`);
       
@@ -296,6 +310,9 @@ class SharedPoolService {
       }
       
       logger.success(`➖ Removed account ${accountId} from pool ${poolId}`);
+      
+      // 检查账号是否还在其他池中，如果不在任何池中，自动加入默认池
+      await this.autoManageDefaultPool(accountId);
       
       return { success: true };
     } catch (error) {
@@ -456,8 +473,11 @@ class SharedPoolService {
       const accountIds = await this.getPoolAccounts(pool.id);
       
       if (accountIds.length === 0) {
+        logger.warn(`⚠️ Pool ${pool.name} (${pool.id}) has no accounts`);
         return null;
       }
+      
+      logger.debug(`🔍 Pool ${pool.name} (${pool.id}) has ${accountIds.length} accounts`);
 
       // 根据策略选择账户
       let selectedAccountId = null;
@@ -498,19 +518,40 @@ class SharedPoolService {
 
     // 过滤掉限流、临时禁用和不可用的账户
     const activeAccountIds = [];
+    logger.debug(`🔍 Checking ${availableIds.length} accounts in pool ${poolId}`);
+    
     for (const accountId of availableIds) {
       const accountData = await claudeAccountService._getAccountData(accountId);
-      if (accountData && accountData.isActive === 'true' && accountData.status !== 'error' && accountData.status !== 'banned') {
-        // 检查是否被限流
-        const isRateLimited = await claudeAccountService.isAccountRateLimited(accountId);
-        // 检查是否被临时禁用
-        const banStatus = await accountTempBanService.isAccountBanned(accountId);
-        if (!isRateLimited && !banStatus.isBanned) {
-          activeAccountIds.push(accountId);
-        } else if (banStatus.isBanned) {
-          logger.debug(`🚫 Account ${accountId} is temporarily banned: ${banStatus.reason}, expires in ${banStatus.remainingSeconds}s`);
-        }
+      if (!accountData) {
+        logger.warn(`⚠️ Account ${accountId} data not found`);
+        continue;
       }
+      
+      // 只检查 isActive 字段，不限制 status
+      if (accountData.isActive !== 'true') {
+        logger.debug(`❌ Account ${accountId} is not active (isActive: ${accountData.isActive})`);
+        continue;
+      }
+      
+      // 不再限制 status 字段，让实际使用来决定账号是否可用
+      logger.debug(`🔍 Account ${accountId} status: ${accountData.status} - will try to use it`);
+      
+      // 检查是否被限流
+      const isRateLimited = await claudeAccountService.isAccountRateLimited(accountId);
+      if (isRateLimited) {
+        logger.debug(`🚫 Account ${accountId} is rate limited`);
+        continue;
+      }
+      
+      // 检查是否被临时禁用
+      const banStatus = await accountTempBanService.isAccountBanned(accountId);
+      if (banStatus.isBanned) {
+        logger.debug(`🚫 Account ${accountId} is temporarily banned: ${banStatus.reason}, expires in ${banStatus.remainingSeconds}s`);
+        continue;
+      }
+      
+      activeAccountIds.push(accountId);
+      logger.debug(`✅ Account ${accountId} is available for selection`);
     }
 
     if (activeAccountIds.length === 0) {
@@ -549,19 +590,40 @@ class SharedPoolService {
 
     // 过滤掉限流、临时禁用和不可用的账户
     const activeAccountIds = [];
+    logger.debug(`🔍 Checking ${availableIds.length} accounts using random strategy`);
+    
     for (const accountId of availableIds) {
       const accountData = await claudeAccountService._getAccountData(accountId);
-      if (accountData && accountData.isActive === 'true' && accountData.status !== 'error' && accountData.status !== 'banned') {
-        // 检查是否被限流
-        const isRateLimited = await claudeAccountService.isAccountRateLimited(accountId);
-        // 检查是否被临时禁用
-        const banStatus = await accountTempBanService.isAccountBanned(accountId);
-        if (!isRateLimited && !banStatus.isBanned) {
-          activeAccountIds.push(accountId);
-        } else if (banStatus.isBanned) {
-          logger.debug(`🚫 Account ${accountId} is temporarily banned: ${banStatus.reason}, expires in ${banStatus.remainingSeconds}s`);
-        }
+      if (!accountData) {
+        logger.warn(`⚠️ Account ${accountId} data not found`);
+        continue;
       }
+      
+      // 只检查 isActive 字段，不限制 status
+      if (accountData.isActive !== 'true') {
+        logger.debug(`❌ Account ${accountId} is not active (isActive: ${accountData.isActive})`);
+        continue;
+      }
+      
+      // 不再限制 status 字段，让实际使用来决定账号是否可用
+      logger.debug(`🔍 Account ${accountId} status: ${accountData.status} - will try to use it`);
+      
+      // 检查是否被限流
+      const isRateLimited = await claudeAccountService.isAccountRateLimited(accountId);
+      if (isRateLimited) {
+        logger.debug(`🚫 Account ${accountId} is rate limited`);
+        continue;
+      }
+      
+      // 检查是否被临时禁用
+      const banStatus = await accountTempBanService.isAccountBanned(accountId);
+      if (banStatus.isBanned) {
+        logger.debug(`🚫 Account ${accountId} is temporarily banned: ${banStatus.reason}, expires in ${banStatus.remainingSeconds}s`);
+        continue;
+      }
+      
+      activeAccountIds.push(accountId);
+      logger.debug(`✅ Account ${accountId} is available for selection`);
     }
 
     if (activeAccountIds.length === 0) {
@@ -589,10 +651,19 @@ class SharedPoolService {
 
     // 获取所有账户的使用信息
     const accountsWithUsage = [];
+    logger.debug(`🔍 Checking ${availableIds.length} accounts using least_used strategy`);
     
     for (const accountId of availableIds) {
       const accountData = await claudeAccountService._getAccountData(accountId);
-      if (accountData && accountData.isActive === 'true' && accountData.status !== 'error' && accountData.status !== 'banned') {
+      if (!accountData) {
+        logger.warn(`⚠️ Account ${accountId} data not found`);
+        continue;
+      }
+      
+      logger.debug(`📊 Account ${accountId} - isActive: ${accountData.isActive}, status: ${accountData.status}`);
+      
+      // 只检查 isActive，不限制 status
+      if (accountData && accountData.isActive === 'true') {
         // 检查是否被限流
         const isRateLimited = await claudeAccountService.isAccountRateLimited(accountId);
         // 检查是否被临时禁用
@@ -602,6 +673,7 @@ class SharedPoolService {
             id: accountId,
             lastUsedAt: new Date(accountData.lastUsedAt || 0).getTime()
           });
+          logger.debug(`✅ Account ${accountId} added to selection pool`);
         } else if (banStatus.isBanned) {
           logger.debug(`🚫 Account ${accountId} is temporarily banned: ${banStatus.reason}, expires in ${banStatus.remainingSeconds}s`);
         }
@@ -664,6 +736,57 @@ class SharedPoolService {
     } catch (error) {
       logger.error('❌ Failed to cleanup invalid associations:', error);
       return 0;
+    }
+  }
+
+  // 🔍 获取账号所属的所有共享池
+  async getPoolsByAccountId(accountId) {
+    try {
+      const client = redis.getClient();
+      if (!client) return [];
+      
+      const pools = [];
+      const poolKeys = await client.keys(`${this.POOL_ACCOUNTS_KEY_PREFIX}*`);
+      
+      for (const poolKey of poolKeys) {
+        const isMember = await client.sismember(poolKey, accountId);
+        if (isMember) {
+          const poolId = poolKey.replace(this.POOL_ACCOUNTS_KEY_PREFIX, '');
+          const pool = await this.getPool(poolId);
+          if (pool) {
+            pools.push(pool);
+          }
+        }
+      }
+      
+      return pools;
+    } catch (error) {
+      logger.error(`❌ Failed to get pools for account ${accountId}:`, error);
+      return [];
+    }
+  }
+
+  // 🏊 自动管理账号的默认池归属
+  async autoManageDefaultPool(accountId) {
+    try {
+      const pools = await this.getPoolsByAccountId(accountId);
+      const defaultPool = await this.getDefaultPool();
+      
+      if (!defaultPool) {
+        logger.warn('⚠️ No default pool exists, cannot auto-manage');
+        return;
+      }
+      
+      const isInDefaultPool = pools.some(pool => pool.id === defaultPool.id);
+      const hasOtherPools = pools.some(pool => pool.id !== defaultPool.id);
+      
+      if (pools.length === 0 || (!hasOtherPools && !isInDefaultPool)) {
+        // 账号没有分配到任何池，或者只在非默认池中，自动加入默认池
+        await this.addAccountToPool(defaultPool.id, accountId);
+        logger.info(`🏊 Auto-added account ${accountId} to default pool`);
+      }
+    } catch (error) {
+      logger.error(`❌ Failed to auto-manage default pool for account ${accountId}:`, error);
     }
   }
 

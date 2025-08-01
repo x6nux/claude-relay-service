@@ -94,6 +94,10 @@ class ClaudeAccountService {
     
     logger.success(`🏢 Created Claude account: ${name} (${accountId})`);
     
+    // 自动管理默认池归属
+    const sharedPoolService = require('./sharedPoolService');
+    await sharedPoolService.autoManageDefaultPool(accountId);
+    
     return {
       id: accountId,
       name,
@@ -489,7 +493,8 @@ class ClaudeAccountService {
       // 如果API Key绑定了专属账户，优先使用
       if (apiKeyData.claudeAccountId && (!excludeAccountIds || !excludeAccountIds.has(apiKeyData.claudeAccountId))) {
         const boundAccount = await redis.getClaudeAccount(apiKeyData.claudeAccountId);
-        if (boundAccount && boundAccount.isActive === 'true' && boundAccount.status !== 'error' && boundAccount.status !== 'banned') {
+        // 只检查 isActive，不限制 status - 让实际使用来决定账号是否可用
+        if (boundAccount && boundAccount.isActive === 'true') {
           // 检查是否被临时禁用
           const banStatus = await accountTempBanService.isAccountBanned(apiKeyData.claudeAccountId);
           if (!banStatus.isBanned) {
