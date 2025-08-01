@@ -1,6 +1,7 @@
 const { v4: uuidv4 } = require('uuid');
 const redis = require('../models/redis');
 const logger = require('../utils/logger');
+const accountTempBanService = require('./accountTempBanService');
 
 class SharedPoolService {
   constructor() {
@@ -495,22 +496,26 @@ class SharedPoolService {
 
     if (availableIds.length === 0) return null;
 
-    // 过滤掉限流和不可用的账户
+    // 过滤掉限流、临时禁用和不可用的账户
     const activeAccountIds = [];
     for (const accountId of availableIds) {
       const accountData = await claudeAccountService._getAccountData(accountId);
       if (accountData && accountData.isActive === 'true' && accountData.status !== 'error' && accountData.status !== 'banned') {
         // 检查是否被限流
         const isRateLimited = await claudeAccountService.isAccountRateLimited(accountId);
-        if (!isRateLimited) {
+        // 检查是否被临时禁用
+        const banStatus = await accountTempBanService.isAccountBanned(accountId);
+        if (!isRateLimited && !banStatus.isBanned) {
           activeAccountIds.push(accountId);
+        } else if (banStatus.isBanned) {
+          logger.debug(`🚫 Account ${accountId} is temporarily banned: ${banStatus.reason}, expires in ${banStatus.remainingSeconds}s`);
         }
       }
     }
 
     if (activeAccountIds.length === 0) {
-      // 如果所有账户都被限流，则从原始可用账户中选择（作为备用方案）
-      logger.warn(`⚠️ All accounts in pool ${poolId} are rate limited, falling back to original list`);
+      // 如果所有账户都被限流或禁用，则从原始可用账户中选择（作为备用方案）
+      logger.warn(`⚠️ All accounts in pool ${poolId} are rate limited or banned, falling back to original list`);
       if (availableIds.length === 0) return null;
       
       // 获取并更新轮询索引
@@ -542,22 +547,26 @@ class SharedPoolService {
 
     if (availableIds.length === 0) return null;
 
-    // 过滤掉限流和不可用的账户
+    // 过滤掉限流、临时禁用和不可用的账户
     const activeAccountIds = [];
     for (const accountId of availableIds) {
       const accountData = await claudeAccountService._getAccountData(accountId);
       if (accountData && accountData.isActive === 'true' && accountData.status !== 'error' && accountData.status !== 'banned') {
         // 检查是否被限流
         const isRateLimited = await claudeAccountService.isAccountRateLimited(accountId);
-        if (!isRateLimited) {
+        // 检查是否被临时禁用
+        const banStatus = await accountTempBanService.isAccountBanned(accountId);
+        if (!isRateLimited && !banStatus.isBanned) {
           activeAccountIds.push(accountId);
+        } else if (banStatus.isBanned) {
+          logger.debug(`🚫 Account ${accountId} is temporarily banned: ${banStatus.reason}, expires in ${banStatus.remainingSeconds}s`);
         }
       }
     }
 
     if (activeAccountIds.length === 0) {
-      // 如果所有账户都被限流，则从原始可用账户中选择（作为备用方案）
-      logger.warn(`⚠️ All accounts are rate limited in random selection, falling back to original list`);
+      // 如果所有账户都被限流或禁用，则从原始可用账户中选择（作为备用方案）
+      logger.warn(`⚠️ All accounts are rate limited or banned in random selection, falling back to original list`);
       if (availableIds.length === 0) return null;
       const randomIndex = Math.floor(Math.random() * availableIds.length);
       return availableIds[randomIndex];
@@ -586,11 +595,15 @@ class SharedPoolService {
       if (accountData && accountData.isActive === 'true' && accountData.status !== 'error' && accountData.status !== 'banned') {
         // 检查是否被限流
         const isRateLimited = await claudeAccountService.isAccountRateLimited(accountId);
-        if (!isRateLimited) {
+        // 检查是否被临时禁用
+        const banStatus = await accountTempBanService.isAccountBanned(accountId);
+        if (!isRateLimited && !banStatus.isBanned) {
           accountsWithUsage.push({
             id: accountId,
             lastUsedAt: new Date(accountData.lastUsedAt || 0).getTime()
           });
+        } else if (banStatus.isBanned) {
+          logger.debug(`🚫 Account ${accountId} is temporarily banned: ${banStatus.reason}, expires in ${banStatus.remainingSeconds}s`);
         }
       }
     }

@@ -199,7 +199,7 @@ class ClaudeRelayService {
     let lastResponse = null;
     let lastError = null;
     const usedAccountIds = new Set(); // 记录已使用的账户ID，避免重复使用
-    const sessionHash = sessionHelper.getSessionHash(clientRequest);
+    const sessionHash = sessionHelper.generateSessionHash(requestBody);
     let retryCount = 0;
     
     // 获取所有可用账号

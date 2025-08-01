@@ -7,6 +7,7 @@ const redis = require('../models/redis');
 const logger = require('../utils/logger');
 const config = require('../../config/config');
 const { maskToken } = require('../utils/tokenMask');
+const accountTempBanService = require('./accountTempBanService');
 const {
   logRefreshStart,
   logRefreshSuccess,
@@ -489,12 +490,18 @@ class ClaudeAccountService {
       if (apiKeyData.claudeAccountId && (!excludeAccountIds || !excludeAccountIds.has(apiKeyData.claudeAccountId))) {
         const boundAccount = await redis.getClaudeAccount(apiKeyData.claudeAccountId);
         if (boundAccount && boundAccount.isActive === 'true' && boundAccount.status !== 'error' && boundAccount.status !== 'banned') {
-          logger.info(`🎯 Using bound dedicated account: ${boundAccount.name} (${apiKeyData.claudeAccountId}) for API key ${apiKeyData.name}`);
-          // 专属账户不属于任何池，poolId为null
-          return {
-            accountId: apiKeyData.claudeAccountId,
-            poolId: null
-          };
+          // 检查是否被临时禁用
+          const banStatus = await accountTempBanService.isAccountBanned(apiKeyData.claudeAccountId);
+          if (!banStatus.isBanned) {
+            logger.info(`🎯 Using bound dedicated account: ${boundAccount.name} (${apiKeyData.claudeAccountId}) for API key ${apiKeyData.name}`);
+            // 专属账户不属于任何池，poolId为null
+            return {
+              accountId: apiKeyData.claudeAccountId,
+              poolId: null
+            };
+          } else {
+            logger.warn(`⚠️ Bound account ${apiKeyData.claudeAccountId} is temporarily banned: ${banStatus.reason}, expires in ${banStatus.remainingSeconds}s, falling back to shared pools`);
+          }
         } else {
           const status = boundAccount ? boundAccount.status : 'not found';
           logger.warn(`⚠️ Bound account ${apiKeyData.claudeAccountId} is not available (status: ${status}), falling back to shared pools`);
