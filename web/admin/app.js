@@ -374,8 +374,7 @@ const app = createApp({
             accountCurrentPools: [],
             accountAvailablePools: [],
             
-            // API Key共享池管理
-            showApiKeyPoolsModal: false,
+            // API Key共享池管理（使用上面已定义的showApiKeyPoolsModal）
             currentApiKeyForPools: null,
             apiKeyCurrentPools: [],
             apiKeyAvailablePools: [],
@@ -406,7 +405,7 @@ const app = createApp({
                 callbackUrl: ''
             },
             editAuthUrlLoading: false
-        }
+        };
     },
     
     computed: {
@@ -736,11 +735,67 @@ const app = createApp({
             return descriptions[code] || code;
         },
         
+        // 从完整URL中提取路径和参数部分
+        getUrlPathAndParams(fullUrl) {
+            try {
+                const url = new URL(fullUrl);
+                return url.pathname + url.search;
+            } catch (e) {
+                return fullUrl; // 如果解析失败，返回原始URL
+            }
+        },
+        
         // 关闭错误详情弹窗
         closeErrorDetailsModal() {
             this.showErrorDetailsModal = false;
             this.selectedAccountForError = null;
             this.accountErrorHistory = [];
+        },
+        
+        // 生成编辑账号的OAuth授权URL
+        async generateEditAuthUrl() {
+            this.editAuthUrlLoading = true;
+            try {
+                // Build proxy configuration from edit form
+                let proxy = null;
+                if (this.editAccountForm.proxyType) {
+                    proxy = {
+                        type: this.editAccountForm.proxyType,
+                        host: this.editAccountForm.proxyHost,
+                        port: parseInt(this.editAccountForm.proxyPort),
+                        username: this.editAccountForm.proxyUsername || null,
+                        password: this.editAccountForm.proxyPassword || null
+                    };
+                }
+                const endpoint = this.editAccountForm.platform === 'gemini' 
+                    ? '/admin/gemini-accounts/generate-auth-url'
+                    : '/admin/claude-accounts/generate-auth-url';
+                const data = await this.apiRequest(endpoint, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        proxy: proxy
+                    })
+                });
+                
+                if (!data) {
+                    // 如果token过期，apiRequest会返回null并刷新页面
+                    return;
+                }
+                
+                if (data.success) {
+                    this.editOauthData = {
+                        sessionId: data.data.sessionId,
+                        authUrl: data.data.authUrl,
+                        callbackUrl: ''
+                    };
+                    console.log('Edit OAuth data generated:', this.editOauthData);
+                }
+            } catch (error) {
+                console.error('Failed to generate edit auth URL:', error);
+                this.showToast('生成授权链接失败', 'error');
+            } finally {
+                this.editAuthUrlLoading = false;
+            }
         },
         
         // API Keys列表排序
@@ -1669,7 +1724,7 @@ const app = createApp({
         },
         
         // 处理 Gemini OAuth 授权码输入
-        handleGeminiAuthCodeInput(value, isUserTyping = false) {
+        handleGeminiAuthCodeInput(value, _isUserTyping = false) {
             if (!value || typeof value !== 'string') return;
             
             const trimmedValue = value.trim();
@@ -1916,7 +1971,7 @@ const app = createApp({
                         console.warn('Version check warning:', data.warning);
                     }
                 } else {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    throw new Error(result.error || '检查更新失败');
                 }
             } catch (error) {
                 console.error('Error checking for updates:', error);
@@ -2218,7 +2273,7 @@ const app = createApp({
                 });
                 
                 // 加载完成后自动排序
-                this.sortAccounts();
+                this.performAccountSort();
             } catch (error) {
                 console.error('Failed to load accounts:', error);
             } finally {
@@ -2226,30 +2281,34 @@ const app = createApp({
             }
         },
         
-        // 账户排序
-        sortAccounts() {
+        // 执行账户排序
+        performAccountSort() {
             if (!this.accounts || this.accounts.length === 0) return;
             
             this.accounts.sort((a, b) => {
                 switch (this.accountSortBy) {
                     case 'name':
                         return a.name.localeCompare(b.name);
-                    case 'dailyTokens':
+                    case 'dailyTokens': {
                         const aTokens = (a.usage && a.usage.daily && a.usage.daily.allTokens) || 0;
                         const bTokens = (b.usage && b.usage.daily && b.usage.daily.allTokens) || 0;
                         return bTokens - aTokens; // 降序
-                    case 'dailyRequests':
+                    }
+                    case 'dailyRequests': {
                         const aRequests = (a.usage && a.usage.daily && a.usage.daily.requests) || 0;
                         const bRequests = (b.usage && b.usage.daily && b.usage.daily.requests) || 0;
                         return bRequests - aRequests; // 降序
-                    case 'totalTokens':
+                    }
+                    case 'totalTokens': {
                         const aTotalTokens = (a.usage && a.usage.total && a.usage.total.allTokens) || 0;
                         const bTotalTokens = (b.usage && b.usage.total && b.usage.total.allTokens) || 0;
                         return bTotalTokens - aTotalTokens; // 降序
-                    case 'lastUsed':
+                    }
+                    case 'lastUsed': {
                         const aLastUsed = a.lastUsedAt ? new Date(a.lastUsedAt) : new Date(0);
                         const bLastUsed = b.lastUsedAt ? new Date(b.lastUsedAt) : new Date(0);
                         return bLastUsed - aLastUsed; // 降序（最近使用的在前）
+                    }
                     default:
                         return 0;
                 }
@@ -2929,7 +2988,7 @@ const app = createApp({
                 
                 if (this.trendGranularity === 'hour') {
                     // 小时粒度，传递开始和结束时间
-                    url += `granularity=hour`;
+                    url += 'granularity=hour';
                     if (this.dateFilter.customRange && this.dateFilter.customRange.length === 2) {
                         url += `&startDate=${encodeURIComponent(this.dateFilter.customRange[0])}`;
                         url += `&endDate=${encodeURIComponent(this.dateFilter.customRange[1])}`;
@@ -2972,7 +3031,7 @@ const app = createApp({
                 
                 if (this.trendGranularity === 'hour') {
                     // 小时粒度，传递开始和结束时间
-                    url += `granularity=hour`;
+                    url += 'granularity=hour';
                     if (this.dateFilter.customRange && this.dateFilter.customRange.length === 2) {
                         url += `&startDate=${encodeURIComponent(this.dateFilter.customRange[0])}`;
                         url += `&endDate=${encodeURIComponent(this.dateFilter.customRange[1])}`;
@@ -4503,7 +4562,7 @@ const app = createApp({
                     throw new Error(error.message || '创建失败');
                 }
                 
-                const newPool = await response.json();
+                await response.json();
                 this.showToast('共享池创建成功', 'success');
                 this.closeCreatePoolModal();
                 await this.loadSharedPools();
@@ -4946,7 +5005,7 @@ const app = createApp({
         },
         
         // 加载API Key的共享池信息
-        async loadApiKeyPools(apiKeyId) {
+        async loadApiKeyPools(_apiKeyId) {
             try {
                 // 加载所有共享池
                 const allPoolsResponse = await fetch('/admin/shared-pools', {
