@@ -46,6 +46,15 @@ class ClaudeAccountService {
     
     if (claudeAiOauth) {
       // 使用Claude标准格式的OAuth数据
+      // 支持下划线和驼峰两种格式
+      const accessToken = claudeAiOauth.access_token || claudeAiOauth.accessToken || '';
+      const refreshToken = claudeAiOauth.refresh_token || claudeAiOauth.refreshToken || '';
+      const expiresIn = claudeAiOauth.expires_in || claudeAiOauth.expiresIn || 3600;
+      const expiresAt = claudeAiOauth.expires_at || claudeAiOauth.expiresAt || 
+        new Date(Date.now() + expiresIn * 1000).toISOString();
+      const scopes = claudeAiOauth.scope || claudeAiOauth.scopes || '';
+      const scopesString = Array.isArray(scopes) ? scopes.join(' ') : scopes;
+      
       accountData = {
         id: accountId,
         name,
@@ -53,10 +62,10 @@ class ClaudeAccountService {
         email: this._encryptSensitiveData(email),
         password: this._encryptSensitiveData(password),
         claudeAiOauth: this._encryptSensitiveData(JSON.stringify(claudeAiOauth)),
-        accessToken: this._encryptSensitiveData(claudeAiOauth.accessToken),
-        refreshToken: this._encryptSensitiveData(claudeAiOauth.refreshToken),
-        expiresAt: claudeAiOauth.expiresAt.toString(),
-        scopes: claudeAiOauth.scopes.join(' '),
+        accessToken: this._encryptSensitiveData(accessToken),
+        refreshToken: this._encryptSensitiveData(refreshToken),
+        expiresAt: new Date(expiresAt).toISOString(),
+        scopes: scopesString,
         proxy: proxy ? JSON.stringify(proxy) : '',
         isActive: isActive.toString(),
         accountType: accountType, // 账号类型：'dedicated' 或 'shared'
