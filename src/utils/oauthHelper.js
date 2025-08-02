@@ -207,6 +207,13 @@ async function exchangeCodeForTokens(authorizationCode, codeVerifier, state, pro
                 }
             }
             
+            // 常见错误码的友好提示
+            if (status === 400 && errorData?.error === 'invalid_grant') {
+                errorMessage = 'Authorization code is invalid or has expired. Please generate a new authorization URL and try again.';
+            } else if (status === 401) {
+                errorMessage = 'Authentication failed. The authorization code or session may be invalid.';
+            }
+            
             throw new Error(`Token exchange failed: ${errorMessage}`);
         } else if (error.request) {
             // 请求被发送但没有收到响应
@@ -238,6 +245,11 @@ function parseCallbackUrl(input) {
     }
 
     const trimmedInput = input.trim();
+    
+    // 如果输入为空
+    if (!trimmedInput) {
+        throw new Error('授权码或回调 URL 不能为空');
+    }
     
     // 情况1: 尝试作为完整URL解析
     if (trimmedInput.startsWith('http://') || trimmedInput.startsWith('https://')) {

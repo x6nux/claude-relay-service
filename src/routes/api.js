@@ -654,17 +654,50 @@ router.post('/v1/accounts/oauth/exchange-code', authenticateApiKey, checkAccount
     await redis.deleteOAuthSession(sessionId);
     
     logger.success('🎉 Successfully exchanged authorization code via API');
+    
+    // 将驼峰格式转换为下划线格式
+    const claudeAiOauth = {
+      access_token: tokenData.accessToken,
+      refresh_token: tokenData.refreshToken,
+      expires_at: tokenData.expiresAt,
+      scopes: tokenData.scopes,
+      is_max: tokenData.isMax
+    };
+    
     res.json({
       success: true,
       data: {
-        claudeAiOauth: tokenData
+        claudeAiOauth
       }
     });
   } catch (error) {
-    logger.error('❌ Failed to exchange authorization code via API:', error);
-    res.status(500).json({
+    logger.error('❌ Failed to exchange authorization code via API:', {
+      error: error.message,
+      stack: error.stack,
+      sessionId: req.body.sessionId,
+      // 不记录完整的授权码，只记录长度和前几个字符
+      codeLength: req.body.callbackUrl ? req.body.callbackUrl.length : (req.body.authorizationCode ? req.body.authorizationCode.length : 0),
+      codePrefix: req.body.callbackUrl ? req.body.callbackUrl.substring(0, 10) + '...' : (req.body.authorizationCode ? req.body.authorizationCode.substring(0, 10) + '...' : 'N/A')
+    });
+    
+    // 返回更详细的错误信息
+    let errorMessage = error.message || 'Unknown error';
+    let statusCode = 500;
+    
+    // 根据错误类型设置不同的状态码
+    if (errorMessage.includes('Invalid or expired OAuth session')) {
+      statusCode = 400;
+    } else if (errorMessage.includes('Token exchange failed: HTTP')) {
+      statusCode = 502; // Bad Gateway - 上游服务错误
+    }
+    
+    res.status(statusCode).json({
       error: 'Failed to exchange authorization code',
-      message: error.message
+      message: errorMessage,
+      details: error.response ? {
+        status: error.response.status,
+        data: error.response.data
+      } : undefined
     });
   }
 });

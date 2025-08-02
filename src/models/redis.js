@@ -782,6 +782,11 @@ class RedisClient {
   async getOAuthSession(sessionId) {
     const key = `oauth:${sessionId}`;
     const data = await this.client.hgetall(key);
+    
+    // 如果没有数据，返回null
+    if (!data || Object.keys(data).length === 0) {
+      return null;
+    }
 
     // 反序列化 proxy 字段
     if (data.proxy) {
