@@ -6,17 +6,11 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - PORT=8080
-      - GIN_MODE=production
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_PASSWORD=""
-      - REDIS_DB=0
       - TARGET_URL=http://claude-relay:3001
-      - PROXY_TIMEOUT=300
+      - REDIS_HOST=redis
+      - GIN_MODE=production
       - MIDDLEWARE_AUTH_ENABLED=${MIDDLEWARE_AUTH_ENABLED:-false}
       - MIDDLEWARE_API_KEYS=${MIDDLEWARE_API_KEYS:-}
-      - MIDDLEWARE_API_KEY_PREFIX=${MIDDLEWARE_API_KEY_PREFIX:-cr_}
     depends_on:
       - redis
     restart: unless-stopped

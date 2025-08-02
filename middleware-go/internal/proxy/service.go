@@ -424,10 +424,19 @@ func (s *Service) markAccountRateLimited(accountID string) {
 
 // refreshAccounts 刷新账户列表
 func (s *Service) refreshAccounts() {
+	log.Printf("Starting account refresh...")
+	
 	accounts, err := s.redisClient.GetAllActiveAccounts()
 	if err != nil {
 		log.Printf("Failed to refresh accounts: %v", err)
 		return
+	}
+	
+	// 打印账户详情以便调试
+	log.Printf("Found %d accounts in Redis:", len(accounts))
+	for i, acc := range accounts {
+		log.Printf("  Account %d: ID=%s, Name=%s, IsActive=%v, Status=%s", 
+			i+1, acc.ID, acc.Name, acc.IsActive, acc.Status)
 	}
 	
 	s.accountsMutex.Lock()
@@ -435,7 +444,7 @@ func (s *Service) refreshAccounts() {
 	s.lastRefresh = time.Now()
 	s.accountsMutex.Unlock()
 	
-	log.Printf("Refreshed %d active accounts", len(accounts))
+	log.Printf("✅ Successfully refreshed %d active accounts", len(accounts))
 }
 
 // accountRefreshWorker 定期刷新账户列表

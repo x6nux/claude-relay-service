@@ -51,7 +51,8 @@ func (c *Client) Close() error {
 
 // GetAllActiveAccounts 获取所有活跃的Claude账户（只读操作）
 func (c *Client) GetAllActiveAccounts() ([]ClaudeAccount, error) {
-	keys, err := c.client.Keys(c.ctx, "claude_account:*").Result()
+	// 修复：使用正确的key前缀 claude:account:*
+	keys, err := c.client.Keys(c.ctx, "claude:account:*").Result()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get account keys: %w", err)
 	}
