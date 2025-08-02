@@ -23,11 +23,6 @@ type Service struct {
 	targetURL   *url.URL
 	httpClient  *http.Client
 	
-	// 负载均衡状态
-	accountsMutex     sync.RWMutex
-	activeAccounts    []redis.ClaudeAccount
-	lastRefresh       time.Time
-	
 	// 账户状态标记（仅内存，不写入Redis）
 	rateLimitedCache  map[string]time.Time  // accountID -> 限流结束时间
 	problematicCache  map[string]time.Time  // accountID -> 问题恢复时间
@@ -51,12 +46,6 @@ func NewService(redisClient *redis.Client, cfg *config.Config) *Service {
 		},
 	}
 	
-	// 初始加载账户
-	service.refreshAccounts()
-	
-	// 启动定期刷新协程
-	go service.accountRefreshWorker()
-	
 	return service
 }
 
@@ -76,6 +65,35 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 	}
 	
 	log.Printf("Selected account %s for %s", accountID, requestPath)
+	
+	// 获取账户详细信息并存储到context
+	accounts, err := s.redisClient.GetAllActiveAccounts()
+	if err != nil {
+		log.Printf("Failed to get account details: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to retrieve account information"})
+		return
+	}
+	
+	var selectedAccount *redis.ClaudeAccount
+	for _, acc := range accounts {
+		if acc.ID == accountID {
+			selectedAccount = &acc
+			break
+		}
+	}
+	
+	if selectedAccount == nil {
+		log.Printf("Account %s not found in active accounts", accountID)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Selected account not found"})
+		return
+	}
+	
+	// 将账户信息存储到context
+	ctx := WithAccount(c.Request.Context(), *selectedAccount)
+	ctx = WithAccountID(ctx, accountID)
+	c.Request = c.Request.WithContext(ctx)
 	
 	// 读取请求体
 	bodyBytes, err := io.ReadAll(c.Request.Body)
@@ -283,22 +301,12 @@ func (s *Service) shouldMarkAccountAsProblematic(statusCode int) bool {
 func (s *Service) markAccountAsProblematic(accountID string, reason string) {
 	now := time.Now()
 	
-	// 根据错误类型决定禁用时长
-	var disableDuration time.Duration
-	switch {
-	case strings.Contains(reason, "401") || strings.Contains(reason, "403"):
-		// 认证/权限错误，禁用较长时间
-		disableDuration = 30 * time.Minute
-	case strings.Contains(reason, "429"):
-		// 限流，禁用1小时
-		disableDuration = time.Hour
-		s.markAccountRateLimited(accountID) // 同时标记为限流
-	case strings.Contains(reason, "5"):
-		// 服务器错误，禁用较短时间
-		disableDuration = 10 * time.Minute
-	default:
-		// 网络错误等，禁用短时间
-		disableDuration = 5 * time.Minute
+	// 所有异常统一限流5分钟
+	disableDuration := 5 * time.Minute
+	
+	// 如果是429错误，同时标记为限流
+	if strings.Contains(reason, "429") {
+		s.markAccountRateLimited(accountID)
 	}
 	
 	s.rateLimitMutex.Lock()
@@ -334,10 +342,11 @@ func (s *Service) selectAvailableAccount() (string, error) {
 
 // selectAvailableAccountExcluding 选择可用的账户，排除指定账户
 func (s *Service) selectAvailableAccountExcluding(excludeAccountID string) (string, error) {
-	s.accountsMutex.RLock()
-	accounts := make([]redis.ClaudeAccount, len(s.activeAccounts))
-	copy(accounts, s.activeAccounts)
-	s.accountsMutex.RUnlock()
+	// 每次请求时从Redis获取账户
+	accounts, err := s.redisClient.GetAllActiveAccounts()
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch accounts from Redis: %w", err)
+	}
 	
 	if len(accounts) == 0 {
 		return "", fmt.Errorf("no active accounts available")
@@ -420,8 +429,8 @@ func (s *Service) isAccountRateLimited(accountID string) bool {
 		return false
 	}
 	
-	// 限流1小时
-	if time.Since(rateLimitedAt) > time.Hour {
+	// 限流5分钟
+	if time.Since(rateLimitedAt) > 5*time.Minute {
 		// 自动移除过期的限流状态
 		s.rateLimitMutex.Lock()
 		delete(s.rateLimitedCache, accountID)
@@ -441,49 +450,6 @@ func (s *Service) markAccountRateLimited(accountID string) {
 	s.rateLimitedCache[accountID] = now
 	s.rateLimitMutex.Unlock()
 	
-	log.Printf("🚫 Account marked as rate limited: %s", accountID)
+	log.Printf("🚫 Account marked as rate limited for 5 minutes: %s", accountID)
 }
 
-// refreshAccounts 刷新账户列表
-func (s *Service) refreshAccounts() {
-	log.Printf("🔄 Starting account refresh...")
-	
-	accounts, err := s.redisClient.GetAllActiveAccounts()
-	if err != nil {
-		log.Printf("❌ Failed to refresh accounts: %v", err)
-		return
-	}
-	
-	// 打印账户详情以便调试
-	if len(accounts) == 0 {
-		log.Printf("⚠️  No active accounts found in Redis")
-		log.Printf("   Make sure accounts exist with key pattern: claude:account:*")
-		log.Printf("   And accounts have isActive=true and valid status")
-	} else {
-		log.Printf("📊 Found %d accounts in Redis:", len(accounts))
-		for i, acc := range accounts {
-			log.Printf("   Account %d: ID=%s, Name=%s, IsActive=%v, Status=%s", 
-				i+1, acc.ID, acc.Name, acc.IsActive, acc.Status)
-		}
-	}
-	
-	s.accountsMutex.Lock()
-	s.activeAccounts = accounts
-	s.lastRefresh = time.Now()
-	s.accountsMutex.Unlock()
-	
-	if len(accounts) > 0 {
-		log.Printf("✅ Successfully refreshed %d active accounts", len(accounts))
-	}
-}
-
-// accountRefreshWorker 定期刷新账户列表
-func (s *Service) accountRefreshWorker() {
-	ticker := time.NewTicker(30 * time.Second) // 每30秒刷新一次
-	defer ticker.Stop()
-	
-	log.Printf("🔄 Started account refresh worker (refreshing every 30 seconds)")
-	for range ticker.C {
-		s.refreshAccounts()
-	}
-}

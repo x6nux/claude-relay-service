@@ -96,6 +96,10 @@ func main() {
 	} else {
 		log.Printf("API Key authentication disabled")
 	}
+	
+	// 添加账户日志中间件（可选，用于调试）
+	// api.Use(proxy.AccountLoggingMiddleware())
+	// api.Use(proxy.AccountMetricsMiddleware(redisClient))
 
 	// 代理所有请求到Claude API（需要认证）
 	api.Any("/v1/*path", proxyService.ProxyHandler)
