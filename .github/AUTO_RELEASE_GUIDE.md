@@ -125,7 +125,7 @@ git tag -l
 git checkout v1.0.1
 
 # 或者使用 Docker 镜像的特定版本
-docker pull weishaw/claude-relay-service:v1.0.1
+docker pull lfreea/claude-relay-service:v1.0.1
 ```
 
 ### Q: 如何修改版本递增规则？

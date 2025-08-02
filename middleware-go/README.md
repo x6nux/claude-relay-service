@@ -64,7 +64,7 @@ go build -o claude-middleware .
 
 ```bash
 # 拉取最新的中间层镜像
-docker pull weishaw/claude-relay-service:middleware-latest
+docker pull lfreea/claude-relay-service:middleware-latest
 
 # 快速启动
 docker run -d \
@@ -72,7 +72,7 @@ docker run -d \
   -p 8080:8080 \
   -e TARGET_URL=http://localhost:3001 \
   -e REDIS_HOST=localhost \
-  weishaw/claude-relay-service:middleware-latest
+  lfreea/claude-relay-service:middleware-latest
 
 # 健康检查
 curl http://localhost:8080/health
