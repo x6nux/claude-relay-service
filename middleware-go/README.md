@@ -22,9 +22,9 @@
 Go中间层特点:
 - 从Redis只读获取账户信息
 - 在内存中管理账户状态（限流、问题标记）
-- 自动扫描所有请求头，查找并替换"authenticator sk-ant-xxx"为账户ID
-- 保留请求头中的所有前缀（如Bearer、Basic等）
-- 支持任意请求头格式，灵活兼容各种客户端
+- 自动扫描所有请求头，查找 Claude API key (sk-ant-xxx)
+- 支持多种格式：直接的 sk-ant-xxx 或 authenticator sk-ant-xxx
+- 将找到的 API key 替换为选中的账户ID
 - 重启后状态重置，避免僵尸状态
 ```
 
@@ -129,19 +129,19 @@ MIDDLEWARE_AUTH_ENABLED=false
 # 请求示例（支持多种格式）：
 # 方式1: 使用x-api-key
 curl -X POST http://localhost:8080/api/v1/messages \
-  -H "x-api-key: authenticator YOUR_CLAUDE_API_KEY" \
+  -H "x-api-key: sk-ant-xxx" \
   -H "Content-Type: application/json" \
   -d '{"messages": [{"role": "user", "content": "Hello"}]}'
 
 # 方式2: 使用Authorization Bearer
 curl -X POST http://localhost:8080/api/v1/messages \
-  -H "Authorization: Bearer authenticator YOUR_CLAUDE_API_KEY" \
+  -H "Authorization: Bearer sk-ant-xxx" \
   -H "Content-Type: application/json" \
   -d '{"messages": [{"role": "user", "content": "Hello"}]}'
 
-# 方式3: 使用任意自定义header
+# 方式3: 兼容旧格式 (authenticator前缀)
 curl -X POST http://localhost:8080/api/v1/messages \
-  -H "Custom-Auth-Header: authenticator YOUR_CLAUDE_API_KEY" \
+  -H "x-api-key: authenticator sk-ant-xxx" \
   -H "Content-Type: application/json" \
   -d '{"messages": [{"role": "user", "content": "Hello"}]}'
 
@@ -152,16 +152,17 @@ MIDDLEWARE_API_KEYS="cr_your_middleware_key_1,cr_your_middleware_key_2"
 # 请求示例（需要两个key）：
 curl -X POST http://localhost:8080/api/v1/messages \
   -H "x-api-key: cr_your_middleware_key_1" \
-  -H "Authorization: Bearer authenticator YOUR_CLAUDE_API_KEY" \
+  -H "Authorization: Bearer sk-ant-xxx" \
   -H "Content-Type: application/json" \
   -d '{"messages": [{"role": "user", "content": "Hello"}]}'
 ```
 
 **注意事项**：
-- 中间层会扫描所有请求头，查找"authenticator sk-ant-xxx"格式并替换为账户ID
-- 保留原有的所有前缀（Bearer、Basic等），只替换authenticator部分
+- 中间层会扫描所有请求头，查找 Claude API key (sk-ant-xxx)
+- 支持标准格式 `Authorization: Bearer sk-ant-xxx` 和 `x-api-key: sk-ant-xxx`
+- 兼容旧格式 `authenticator sk-ant-xxx`
 - 中间层认证key使用`cr_`前缀（仅在启用认证时需要）
-- Claude API key必须包含`authenticator`前缀，可以放在任何请求头中
+- 找到的 API key 会被替换为选中的账户ID后转发
 
 ## 负载均衡策略
 
