@@ -1,0 +1,212 @@
+name: Build Go Middleware Docker
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'middleware-go/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'middleware-go/**'
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: claude-relay-service
+
+jobs:
+  build-middleware:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch,suffix=-middleware
+          type=ref,event=pr,suffix=-middleware
+          type=sha,prefix={{branch}}-middleware-,format=short
+          type=raw,value=middleware-latest,enable={{is_default_branch}}
+        labels: |
+          org.opencontainers.image.description=Claude API middleware layer for load balancing and failover
+          org.opencontainers.image.vendor=Claude Relay Service
+          middleware.component=go-proxy
+          middleware.feature=load-balancer
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./middleware-go
+        file: ./middleware-go/Dockerfile
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Generate deployment artifact
+      run: |
+        mkdir -p artifacts
+        cat << 'EOF' > artifacts/docker-compose-middleware.yml
+        version: '3.8'
+
+        services:
+          claude-middleware:
+            image: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:middleware-latest
+            container_name: claude-middleware
+            ports:
+              - "8080:8080"
+            environment:
+              - PORT=8080
+              - GIN_MODE=production
+              - REDIS_HOST=${REDIS_HOST:-redis}
+              - REDIS_PORT=${REDIS_PORT:-6379}
+              - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+              - REDIS_DB=${REDIS_DB:-0}
+              - TARGET_URL=${TARGET_URL:-http://claude-relay-service:3001}
+              - PROXY_TIMEOUT=${PROXY_TIMEOUT:-300}
+            restart: unless-stopped
+            depends_on:
+              - redis
+            networks:
+              - claude-network
+
+          redis:
+            image: redis:7-alpine
+            container_name: claude-middleware-redis
+            ports:
+              - "6379:6379"
+            volumes:
+              - redis_data:/data
+            restart: unless-stopped
+            networks:
+              - claude-network
+
+        volumes:
+          redis_data:
+
+        networks:
+          claude-network:
+            external: false
+        EOF
+
+        cat << 'EOF' > artifacts/kubernetes-middleware.yml
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: claude-middleware
+          labels:
+            app: claude-middleware
+        spec:
+          replicas: 2
+          selector:
+            matchLabels:
+              app: claude-middleware
+          template:
+            metadata:
+              labels:
+                app: claude-middleware
+            spec:
+              containers:
+              - name: claude-middleware
+                image: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:middleware-latest
+                ports:
+                - containerPort: 8080
+                env:
+                - name: PORT
+                  value: "8080"
+                - name: GIN_MODE
+                  value: "production"
+                - name: REDIS_HOST
+                  value: "redis-service"
+                - name: REDIS_PORT
+                  value: "6379"
+                - name: TARGET_URL
+                  value: "http://claude-relay-service:3001"
+                - name: PROXY_TIMEOUT
+                  value: "300"
+                resources:
+                  requests:
+                    memory: "64Mi"
+                    cpu: "50m"
+                  limits:
+                    memory: "128Mi"
+                    cpu: "200m"
+                livenessProbe:
+                  httpGet:
+                    path: /health
+                    port: 8080
+                  initialDelaySeconds: 10
+                  periodSeconds: 30
+                readinessProbe:
+                  httpGet:
+                    path: /health
+                    port: 8080
+                  initialDelaySeconds: 5
+                  periodSeconds: 10
+        ---
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: claude-middleware-service
+        spec:
+          selector:
+            app: claude-middleware
+          ports:
+          - protocol: TCP
+            port: 8080
+            targetPort: 8080
+          type: ClusterIP
+        EOF
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: middleware-deployment-files
+        path: artifacts/
+
+    - name: Generate deployment summary
+      run: |
+        echo "## 🚀 Go Middleware Build Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Docker Images Built" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Quick Start" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+        echo "# Pull and run the middleware" >> $GITHUB_STEP_SUMMARY
+        echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:middleware-latest" >> $GITHUB_STEP_SUMMARY
+        echo "docker run -p 8080:8080 -e TARGET_URL=http://localhost:3001 -e REDIS_HOST=localhost ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:middleware-latest" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Features" >> $GITHUB_STEP_SUMMARY
+        echo "- 🔄 Intelligent load balancing with Redis-only reads" >> $GITHUB_STEP_SUMMARY
+        echo "- 🛡️ Memory-based failure detection and recovery" >> $GITHUB_STEP_SUMMARY
+        echo "- 🚀 Multi-architecture support (amd64/arm64)" >> $GITHUB_STEP_SUMMARY
+        echo "- 📊 Comprehensive logging and monitoring" >> $GITHUB_STEP_SUMMARY
+        echo "- 🔧 Zero Redis data modification" >> $GITHUB_STEP_SUMMARY

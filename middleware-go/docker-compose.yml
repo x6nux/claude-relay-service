@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  claude-middleware:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - GIN_MODE=production
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=""
+      - REDIS_DB=0
+      - TARGET_URL=http://claude-relay:3001
+      - PROXY_TIMEOUT=300
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - claude-network
+
+  # 可以添加到现有的docker-compose.yml中
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6379:6379"
+  #   networks:
+  #     - claude-network
+
+networks:
+  claude-network:
+    external: true  # 使用现有网络，或设置为false创建新网络
