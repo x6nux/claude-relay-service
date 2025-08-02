@@ -355,10 +355,31 @@ class ClaudeAccountService {
             // 更新 Claude AI OAuth 数据
             if (value) {
               updatedData.claudeAiOauth = this._encryptSensitiveData(JSON.stringify(value));
-              updatedData.accessToken = this._encryptSensitiveData(value.accessToken);
-              updatedData.refreshToken = this._encryptSensitiveData(value.refreshToken);
-              updatedData.expiresAt = value.expiresAt.toString();
-              updatedData.scopes = value.scopes.join(' ');
+              
+              // 安全地更新各个字段，检查是否存在
+              if (value.accessToken || value.access_token) {
+                updatedData.accessToken = this._encryptSensitiveData(value.accessToken || value.access_token);
+              }
+              
+              if (value.refreshToken || value.refresh_token) {
+                updatedData.refreshToken = this._encryptSensitiveData(value.refreshToken || value.refresh_token);
+              }
+              
+              // 处理 expiresAt 字段（可能是多种格式）
+              if (value.expiresAt || value.expires_at) {
+                updatedData.expiresAt = (value.expiresAt || value.expires_at).toString();
+              } else if (value.expires_in) {
+                // 如果只有 expires_in，计算 expiresAt
+                updatedData.expiresAt = (Date.now() + value.expires_in * 1000).toString();
+              }
+              
+              // 处理 scopes 字段
+              if (value.scopes) {
+                updatedData.scopes = Array.isArray(value.scopes) ? value.scopes.join(' ') : value.scopes;
+              } else if (value.scope) {
+                updatedData.scopes = value.scope;
+              }
+              
               updatedData.status = 'active';
               updatedData.errorMessage = '';
               updatedData.lastRefreshAt = new Date().toISOString();
