@@ -422,19 +422,25 @@ func (s *Service) markAccountRateLimited(accountID string) {
 
 // refreshAccounts 刷新账户列表
 func (s *Service) refreshAccounts() {
-	log.Printf("Starting account refresh...")
+	log.Printf("🔄 Starting account refresh...")
 	
 	accounts, err := s.redisClient.GetAllActiveAccounts()
 	if err != nil {
-		log.Printf("Failed to refresh accounts: %v", err)
+		log.Printf("❌ Failed to refresh accounts: %v", err)
 		return
 	}
 	
 	// 打印账户详情以便调试
-	log.Printf("Found %d accounts in Redis:", len(accounts))
-	for i, acc := range accounts {
-		log.Printf("  Account %d: ID=%s, Name=%s, IsActive=%v, Status=%s", 
-			i+1, acc.ID, acc.Name, acc.IsActive, acc.Status)
+	if len(accounts) == 0 {
+		log.Printf("⚠️  No active accounts found in Redis")
+		log.Printf("   Make sure accounts exist with key pattern: claude:account:*")
+		log.Printf("   And accounts have isActive=true and valid status")
+	} else {
+		log.Printf("📊 Found %d accounts in Redis:", len(accounts))
+		for i, acc := range accounts {
+			log.Printf("   Account %d: ID=%s, Name=%s, IsActive=%v, Status=%s", 
+				i+1, acc.ID, acc.Name, acc.IsActive, acc.Status)
+		}
 	}
 	
 	s.accountsMutex.Lock()
@@ -442,7 +448,9 @@ func (s *Service) refreshAccounts() {
 	s.lastRefresh = time.Now()
 	s.accountsMutex.Unlock()
 	
-	log.Printf("✅ Successfully refreshed %d active accounts", len(accounts))
+	if len(accounts) > 0 {
+		log.Printf("✅ Successfully refreshed %d active accounts", len(accounts))
+	}
 }
 
 // accountRefreshWorker 定期刷新账户列表
