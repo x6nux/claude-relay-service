@@ -42,6 +42,11 @@ REDIS_DB=0
 # 代理配置
 TARGET_URL=http://localhost:3001  # Node.js服务地址
 PROXY_TIMEOUT=300
+
+# 认证配置（可选）
+MIDDLEWARE_AUTH_ENABLED=false           # 是否启用API Key认证
+MIDDLEWARE_API_KEYS=""                  # 允许的API Keys（逗号分隔）
+MIDDLEWARE_API_KEY_PREFIX=cr_           # API Key前缀
 ```
 
 ## 编译和运行
@@ -104,7 +109,39 @@ COPY --from=builder /app/claude-middleware .
 CMD ["./claude-middleware"]
 ```
 
-**详细的Docker部署文档**: [DOCKER.md](DOCKER.md)
+### 🔑 认证配置示例
+
+```bash
+# 启用API Key认证
+MIDDLEWARE_AUTH_ENABLED=true
+
+# 配置允许的API Keys（实际使用中应该是更安全的keys）
+MIDDLEWARE_API_KEYS="cr_your_api_key_1,cr_your_api_key_2,cr_your_api_key_3"
+
+# 自定义API Key前缀（默认为cr_）
+MIDDLEWARE_API_KEY_PREFIX=cr_
+```
+
+**安全建议**：
+- 生产环境中务必启用认证功能
+- 使用强随机API Keys，至少32字符
+- 定期轮换API Keys
+- 不要在日志中记录完整的API Key
+
+### 🔓 认证工作流程
+
+1. **请求验证**: 客户端发送带有`x-api-key`头的请求
+2. **格式检查**: 验证API Key格式和前缀
+3. **权限验证**: 检查API Key是否在允许列表中
+4. **请求转发**: 认证成功后转发到后端服务
+
+```bash
+# 客户端请求示例
+curl -X POST http://localhost:8080/api/v1/messages \
+  -H "x-api-key: cr_your_api_key_here" \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "Hello"}]}'
+```
 
 ## 负载均衡策略
 

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"claude-middleware/internal/auth"
 	"claude-middleware/internal/config"
 	"claude-middleware/internal/proxy"
 	"claude-middleware/internal/redis"
@@ -26,6 +27,9 @@ func main() {
 	// 初始化代理服务
 	proxyService := proxy.NewService(redisClient, cfg)
 
+	// 初始化认证配置
+	authConfig := auth.NewAuthConfig()
+
 	// 设置Gin模式
 	if cfg.Server.Mode == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -36,7 +40,7 @@ func main() {
 	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
 
-	// 健康检查
+	// 健康检查（不需要认证）
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "ok",
@@ -44,13 +48,22 @@ func main() {
 		})
 	})
 
-	// 代理所有请求到Claude API
-	r.Any("/v1/*path", proxyService.ProxyHandler)
-	r.Any("/api/v1/*path", proxyService.ProxyHandler)
-	r.Any("/claude/v1/*path", proxyService.ProxyHandler)
-	r.Any("/gemini/*path", proxyService.ProxyHandler)
-	r.Any("/openai/gemini/v1/*path", proxyService.ProxyHandler)
-	r.Any("/openai/claude/v1/*path", proxyService.ProxyHandler)
+	// 创建需要认证的路由组
+	api := r.Group("/")
+	if authConfig.Enabled {
+		log.Printf("API Key authentication enabled")
+		api.Use(auth.AuthMiddleware(authConfig))
+	} else {
+		log.Printf("API Key authentication disabled")
+	}
+
+	// 代理所有请求到Claude API（需要认证）
+	api.Any("/v1/*path", proxyService.ProxyHandler)
+	api.Any("/api/v1/*path", proxyService.ProxyHandler)
+	api.Any("/claude/v1/*path", proxyService.ProxyHandler)
+	api.Any("/gemini/*path", proxyService.ProxyHandler)
+	api.Any("/openai/gemini/v1/*path", proxyService.ProxyHandler)
+	api.Any("/openai/claude/v1/*path", proxyService.ProxyHandler)
 
 	// 启动服务器
 	port := strconv.Itoa(cfg.Server.Port)

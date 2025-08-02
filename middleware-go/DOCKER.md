@@ -19,7 +19,7 @@ docker run -d \
   -e REDIS_HOST=localhost \
   lfreea/claude-relay-service:middleware-latest
 
-# 完整配置启动
+# 完整配置启动（包含认证）
 docker run -d \
   --name claude-middleware \
   -p 8080:8080 \
@@ -31,6 +31,9 @@ docker run -d \
   -e REDIS_DB=0 \
   -e TARGET_URL=http://claude-relay:3001 \
   -e PROXY_TIMEOUT=300 \
+  -e MIDDLEWARE_AUTH_ENABLED=true \
+  -e MIDDLEWARE_API_KEYS="cr_your_key_1,cr_your_key_2" \
+  -e MIDDLEWARE_API_KEY_PREFIX=cr_ \
   lfreea/claude-relay-service:middleware-latest
 ```
 
@@ -78,6 +81,9 @@ services:
 | `REDIS_DB` | `0` | Redis数据库编号 |
 | `TARGET_URL` | `http://localhost:3001` | Node.js后端地址 |
 | `PROXY_TIMEOUT` | `300` | 代理超时时间(秒) |
+| `MIDDLEWARE_AUTH_ENABLED` | `false` | 是否启用API Key认证 |
+| `MIDDLEWARE_API_KEYS` | `""` | 允许的API Keys(逗号分隔) |
+| `MIDDLEWARE_API_KEY_PREFIX` | `cr_` | API Key前缀 |
 
 ## 🏗️ Kubernetes部署
 
