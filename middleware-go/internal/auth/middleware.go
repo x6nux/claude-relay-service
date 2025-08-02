@@ -89,6 +89,7 @@ func AuthMiddleware(config *AuthConfig) gin.HandlerFunc {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error":   "Invalid API key",
 				"message": "API key is invalid or expired",
+				"debug":   "API key: " + apiKey,
 			})
 			c.Abort()
 			return

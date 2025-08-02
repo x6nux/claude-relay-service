@@ -114,7 +114,14 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 	
 	if !foundAPIKey || apiKey == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{
-			"error": "Missing API key in request headers"})
+			"error": "Missing API key in request headers",
+			"message": "Please provide a Claude API key (sk-ant-xxx) in x-api-key or Authorization header",
+			"supported_formats": []string{
+				"x-api-key: sk-ant-xxx",
+				"Authorization: Bearer sk-ant-xxx", 
+				"x-api-key: authenticator sk-ant-xxx",
+			},
+		})
 		return
 	}
 	
