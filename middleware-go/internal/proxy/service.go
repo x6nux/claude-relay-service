@@ -200,8 +200,23 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 				retryReq.Host = s.targetURL.Host
 				
 				// 重试请求
-				if retryResp, retryErr := s.httpClient.Do(retryReq); retryErr == nil {
+				retryResp, retryErr2 := s.httpClient.Do(retryReq)
+				if retryErr2 == nil {
 					s.handleResponse(c, retryResp, retryAccountID, requestPath)
+					return
+				} else {
+					// 重试请求也失败了
+					log.Printf("❌ Retry request also failed: %v", retryErr2)
+				}
+			} else {
+				// 无法找到可用账户重试
+				log.Printf("⚠️  No available accounts for retry: %v", retryErr)
+				// 如果是429错误且无法重试，返回503服务不可用
+				if resp.StatusCode == 429 {
+					c.JSON(http.StatusServiceUnavailable, gin.H{
+						"error": "All accounts are rate limited",
+						"message": "Service temporarily unavailable, please try again later",
+					})
 					return
 				}
 			}
@@ -328,6 +343,8 @@ func (s *Service) selectAvailableAccountExcluding(excludeAccountID string) (stri
 		return "", fmt.Errorf("no active accounts available")
 	}
 	
+	log.Printf("🔍 Searching for alternative account (excluding %s), total accounts: %d", excludeAccountID, len(accounts))
+	
 	// 过滤掉被排除的账户、限流账户和有问题的账户
 	var availableAccounts []redis.ClaudeAccount
 	var rateLimitedAccounts []redis.ClaudeAccount
@@ -335,6 +352,7 @@ func (s *Service) selectAvailableAccountExcluding(excludeAccountID string) (stri
 	
 	for _, account := range accounts {
 		if account.ID == excludeAccountID {
+			log.Printf("   ⏭️  Skipping excluded account: %s", account.ID)
 			continue
 		}
 		
@@ -343,12 +361,18 @@ func (s *Service) selectAvailableAccountExcluding(excludeAccountID string) (stri
 		
 		if isProblematic {
 			problematicAccounts = append(problematicAccounts, account)
+			log.Printf("   ❌ Account %s is problematic", account.ID)
 		} else if isRateLimited {
 			rateLimitedAccounts = append(rateLimitedAccounts, account)
+			log.Printf("   ⏱️  Account %s is rate limited", account.ID)
 		} else {
 			availableAccounts = append(availableAccounts, account)
+			log.Printf("   ✅ Account %s is available", account.ID)
 		}
 	}
+	
+	log.Printf("📊 Account status: %d available, %d rate-limited, %d problematic", 
+		len(availableAccounts), len(rateLimitedAccounts), len(problematicAccounts))
 	
 	// 优先使用完全可用的账户
 	if len(availableAccounts) > 0 {
@@ -359,7 +383,7 @@ func (s *Service) selectAvailableAccountExcluding(excludeAccountID string) (stri
 			return timeI.Before(timeJ)
 		})
 		
-		log.Printf("Selected available account: %s (%s)", availableAccounts[0].ID, availableAccounts[0].Name)
+		log.Printf("✅ Selected available account: %s (%s)", availableAccounts[0].ID, availableAccounts[0].Name)
 		return availableAccounts[0].ID, nil
 	}
 	
