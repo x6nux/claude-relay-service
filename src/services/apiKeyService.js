@@ -297,6 +297,19 @@ class ApiKeyService {
   // 📊 记录使用情况（支持缓存token、账户级别和共享池统计）
   async recordUsage(keyId, inputTokens = 0, outputTokens = 0, cacheCreateTokens = 0, cacheReadTokens = 0, model = 'unknown', accountId = null, poolId = null) {
     try {
+      // 检查是否是账户直接认证
+      if (keyId && keyId.startsWith('account_')) {
+        // 账户直接认证不记录API Key级别的使用统计，只记录账户级别
+        const totalTokens = inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens;
+        
+        if (accountId) {
+          await redis.incrementAccountUsage(accountId, totalTokens, inputTokens, outputTokens, cacheCreateTokens, cacheReadTokens, model);
+          logger.database(`📊 Recorded direct account usage: ${accountId} - ${totalTokens} tokens`);
+        }
+        
+        return;
+      }
+      
       const totalTokens = inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens;
       
       // 计算费用
@@ -364,6 +377,14 @@ class ApiKeyService {
 
   // 📈 获取使用统计
   async getUsageStats(keyId) {
+    // 检查是否是账户直接认证
+    if (keyId && keyId.startsWith('account_')) {
+      // 提取实际的账户ID
+      const accountId = keyId.replace('account_', '');
+      // 获取账户级别的使用统计
+      return await redis.getAccountUsageStats(accountId);
+    }
+    
     return await redis.getUsageStats(keyId);
   }
 

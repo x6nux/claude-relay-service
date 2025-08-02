@@ -32,8 +32,66 @@ const authenticateApiKey = async (req, res, next) => {
       });
     }
 
-    // 验证API Key（带缓存优化）
-    const validation = await apiKeyService.validateApiKey(apiKey);
+    // 检查是否是Claude账户ID（UUID格式）
+    const isAccountId = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(apiKey);
+    
+    let validation;
+    
+    if (isAccountId) {
+      // 处理账户ID作为API Key的情况
+      const claudeAccountService = require('../services/claudeAccountService');
+      
+      try {
+        // 获取账户信息
+        const accountData = await claudeAccountService._getAccountData(apiKey);
+        
+        if (!accountData || Object.keys(accountData).length === 0) {
+          validation = { valid: false, error: 'Account not found' };
+        } else if (accountData.isActive !== 'true') {
+          validation = { valid: false, error: 'Account is disabled' };
+        } else if (accountData.status === 'error' || accountData.status === 'oauth_revoked') {
+          validation = { valid: false, error: 'Account is in error state' };
+        } else {
+          // 创建虚拟的API Key数据，使后续流程能够正常工作
+          validation = {
+            valid: true,
+            keyData: {
+              id: `account_${apiKey}`, // 使用特殊前缀标识这是账户直接认证
+              name: `Direct Account: ${accountData.name}`,
+              description: 'Direct account authentication',
+              createdAt: accountData.createdAt,
+              expiresAt: '', // 账户不过期
+              claudeAccountId: apiKey, // 直接使用账户ID
+              geminiAccountId: null,
+              permissions: 'claude', // 只允许访问Claude
+              tokenLimit: 0, // 无限制
+              concurrencyLimit: 0, // 无限制
+              rateLimitWindow: 0,
+              rateLimitRequests: 0,
+              enableModelRestriction: false,
+              restrictedModels: [],
+              enableClientRestriction: false,
+              allowedClients: [],
+              dailyCostLimit: 0,
+              dailyCost: 0,
+              usage: {
+                totalTokens: 0,
+                inputTokens: 0,
+                outputTokens: 0,
+                cacheCreateTokens: 0,
+                cacheReadTokens: 0
+              }
+            }
+          };
+        }
+      } catch (error) {
+        logger.error('❌ Error validating account ID as API key:', error);
+        validation = { valid: false, error: 'Internal validation error' };
+      }
+    } else {
+      // 普通API Key验证
+      validation = await apiKeyService.validateApiKey(apiKey);
+    }
     
     if (!validation.valid) {
       const clientIP = getRealIP(req);

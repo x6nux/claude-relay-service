@@ -469,6 +469,24 @@ class ClaudeAccountService {
   // 🎯 基于API Key选择账户（支持专属绑定和多共享池）
   async selectAccountForApiKey(apiKeyData, sessionHash = null, excludeAccountIds = null) {
     try {
+      // 检查是否是账户直接认证（API Key ID以 account_ 开头）
+      if (apiKeyData.id && apiKeyData.id.startsWith('account_')) {
+        // 这是账户直接认证，直接返回绑定的账户ID
+        const accountId = apiKeyData.claudeAccountId;
+        logger.info(`🎯 Direct account authentication: ${accountId}`);
+        
+        // 验证账户是否可用
+        const account = await redis.getClaudeAccount(accountId);
+        if (!account || account.isActive !== 'true' || account.status === 'error' || account.status === 'banned') {
+          throw new Error(`Direct account ${accountId} is not available`);
+        }
+        
+        return {
+          accountId: accountId,
+          poolId: null
+        };
+      }
+      
       // 如果API Key绑定了专属账户，优先使用
       if (apiKeyData.claudeAccountId && (!excludeAccountIds || !excludeAccountIds.has(apiKeyData.claudeAccountId))) {
         const boundAccount = await redis.getClaudeAccount(apiKeyData.claudeAccountId);
