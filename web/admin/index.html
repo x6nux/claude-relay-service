@@ -1121,9 +1121,13 @@
                                                 </span>
                                                 <!-- 临时禁用状态 -->
                                                 <span v-if="account.tempBan && account.tempBan.isBanned" 
-                                                      class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-800">
+                                                      class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-800"
+                                                      :title="`禁用原因: ${account.tempBan.reason}`">
                                                     <i class="fas fa-pause-circle mr-1"></i>
                                                     禁用中 ({{ Math.floor(account.tempBan.remainingSeconds / 60) }}分钟)
+                                                    <span v-if="account.tempBan.reason" class="ml-1">
+                                                        - {{ formatBanReason(account.tempBan.reason) }}
+                                                    </span>
                                                 </span>
                                                 <!-- 错误统计 -->
                                                 <span v-if="account.errorStats && account.errorStats.totalErrors > 0" 

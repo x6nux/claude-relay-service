@@ -2789,6 +2789,20 @@ const app = createApp({
             return number.toLocaleString();
         },
 
+        // 格式化禁用原因
+        formatBanReason(reason) {
+            const reasonMap = {
+                'rate_limit': '429限流',
+                'unauthorized': '401/403认证失败',
+                'server_error': '5xx服务器错误',
+                'timeout': '超时错误',
+                'network_error': '网络错误',
+                'invalid_response': '无效响应',
+                'unknown': '未知错误'
+            };
+            return reasonMap[reason] || reason;
+        },
+
         // 格式化运行时间
         formatUptime(seconds) {
             if (!seconds) return '0s';

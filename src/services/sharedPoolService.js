@@ -135,6 +135,8 @@ class SharedPoolService {
       // 检查默认池是否存在
       const defaultPool = await this.getPool(this.DEFAULT_POOL_ID);
       if (defaultPool) {
+        // 默认池已存在，直接返回，不重新分配账户
+        logger.info(`🏊 Default pool already exists with ${defaultPool.accountIds ? defaultPool.accountIds.length : 0} accounts`);
         return defaultPool;
       }
 
@@ -160,23 +162,24 @@ class SharedPoolService {
       );
 
       if (sharedAccounts.length > 0) {
-        // 获取所有非默认池
-        const allPools = await this.getAllPools();
-        const nonDefaultPools = allPools.filter(pool => pool.id !== this.DEFAULT_POOL_ID);
+        // 获取所有池（包括刚创建的默认池）
+        const allPoolKeys = await client.keys(`${this.POOL_ACCOUNTS_KEY_PREFIX}*`);
         
-        // 收集已分配到其他池的账户ID
+        // 收集所有已分配的账户ID
         const assignedAccountIds = new Set();
-        for (const pool of nonDefaultPools) {
-          const accountIds = await client.smembers(`${this.POOL_ACCOUNTS_KEY_PREFIX}${pool.id}`);
+        for (const poolKey of allPoolKeys) {
+          const accountIds = await client.smembers(poolKey);
           accountIds.forEach(id => assignedAccountIds.add(id));
         }
         
-        // 只添加未分配的账户
+        // 只添加真正未分配到任何池的账户
         const unassignedAccounts = sharedAccounts.filter(acc => !assignedAccountIds.has(acc.id));
         if (unassignedAccounts.length > 0) {
           const accountIds = unassignedAccounts.map(acc => acc.id);
           await client.sadd(`${this.POOL_ACCOUNTS_KEY_PREFIX}${this.DEFAULT_POOL_ID}`, ...accountIds);
           logger.info(`🏊 Added ${accountIds.length} unassigned shared accounts to default pool`);
+        } else {
+          logger.info('✅ All shared accounts are already assigned to pools');
         }
       }
 
@@ -854,6 +857,56 @@ class SharedPoolService {
     }
   }
 
+  // 🔄 同步孤立的共享账户到默认池
+  async syncOrphanedAccountsToDefaultPool() {
+    try {
+      const client = redis.getClient();
+      if (!client) return { synced: 0, errors: [] };
+
+      // 确保默认池存在
+      const defaultPool = await this.getOrCreateDefaultPool();
+      if (!defaultPool) {
+        throw new Error('Failed to get or create default pool');
+      }
+
+      // 获取所有共享账户
+      const accounts = await redis.getAllClaudeAccounts();
+      const sharedAccounts = accounts.filter(account => 
+        account.accountType === 'shared' && account.isActive === 'true'
+      );
+
+      if (sharedAccounts.length === 0) {
+        logger.info('✅ No shared accounts to sync');
+        return { synced: 0, errors: [] };
+      }
+
+      // 获取所有池中的账户
+      const allPoolKeys = await client.keys(`${this.POOL_ACCOUNTS_KEY_PREFIX}*`);
+      const assignedAccountIds = new Set();
+      
+      for (const poolKey of allPoolKeys) {
+        const accountIds = await client.smembers(poolKey);
+        accountIds.forEach(id => assignedAccountIds.add(id));
+      }
+
+      // 找出孤立的账户（未分配到任何池的账户）
+      const orphanedAccounts = sharedAccounts.filter(acc => !assignedAccountIds.has(acc.id));
+      
+      if (orphanedAccounts.length > 0) {
+        const accountIds = orphanedAccounts.map(acc => acc.id);
+        await client.sadd(`${this.POOL_ACCOUNTS_KEY_PREFIX}${defaultPool.id}`, ...accountIds);
+        logger.success(`🏊 Synced ${accountIds.length} orphaned shared accounts to default pool`);
+        return { synced: accountIds.length, errors: [] };
+      } else {
+        logger.info('✅ No orphaned shared accounts found');
+        return { synced: 0, errors: [] };
+      }
+    } catch (error) {
+      logger.error('❌ Failed to sync orphaned accounts:', error);
+      return { synced: 0, errors: [error.message] };
+    }
+  }
+
   // 🔄 执行完整的共享池维护（包括清理无效关联和无效账户）
   async performPoolMaintenance() {
     try {
@@ -865,14 +918,18 @@ class SharedPoolService {
       // 清理无效账户
       const { cleaned: accountsCleaned, errors } = await this.cleanupInvalidAccountsInPools();
       
+      // 同步孤立的共享账户到默认池
+      const { synced: accountsSynced, errors: syncErrors } = await this.syncOrphanedAccountsToDefaultPool();
+      
       const results = {
         associationsCleaned,
         accountsCleaned,
-        errors,
+        accountsSynced,
+        errors: [...errors, ...syncErrors],
         timestamp: new Date().toISOString()
       };
       
-      logger.success(`✅ Pool maintenance completed: ${associationsCleaned} associations, ${accountsCleaned} accounts cleaned`);
+      logger.success(`✅ Pool maintenance completed: ${associationsCleaned} associations cleaned, ${accountsCleaned} accounts cleaned, ${accountsSynced} accounts synced`);
       
       return results;
     } catch (error) {
