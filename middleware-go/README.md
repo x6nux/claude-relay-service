@@ -22,8 +22,9 @@
 Go中间层特点:
 - 从Redis只读获取账户信息
 - 在内存中管理账户状态（限流、问题标记）
-- 自动在任何请求头中查找包含"authenticator"的值并替换为账户ID
-- 支持灵活的请求头格式（x-api-key、Authorization Bearer等）
+- 自动扫描所有请求头，查找并替换"authenticator sk-ant-xxx"为账户ID
+- 保留请求头中的所有前缀（如Bearer、Basic等）
+- 支持任意请求头格式，灵活兼容各种客户端
 - 重启后状态重置，避免僵尸状态
 ```
 
@@ -157,10 +158,10 @@ curl -X POST http://localhost:8080/api/v1/messages \
 ```
 
 **注意事项**：
-- 中间层会自动在所有请求头中查找包含`authenticator`的值
+- 中间层会扫描所有请求头，查找"authenticator sk-ant-xxx"格式并替换为账户ID
+- 保留原有的所有前缀（Bearer、Basic等），只替换authenticator部分
 - 中间层认证key使用`cr_`前缀（仅在启用认证时需要）
 - Claude API key必须包含`authenticator`前缀，可以放在任何请求头中
-- 中间层会自动将`authenticator XXX`替换为选中的账户ID后转发
 
 ## 负载均衡策略
 

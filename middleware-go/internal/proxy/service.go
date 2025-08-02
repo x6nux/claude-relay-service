@@ -62,17 +62,28 @@ func NewService(redisClient *redis.Client, cfg *config.Config) *Service {
 
 // ProxyHandler 处理所有代理请求
 func (s *Service) ProxyHandler(c *gin.Context) {
-	// 查找包含authenticator的请求头
+	// 查找包含authenticator的请求头和具体的key值
 	var foundAuthenticator bool
 	var authenticatorHeader string
-	var authenticatorValue string
+	var authenticatorKey string
 	
 	for key, values := range c.Request.Header {
 		for _, value := range values {
-			if strings.Contains(value, "authenticator ") {
+			// 查找格式: "authenticator sk-ant-xxx"
+			if idx := strings.Index(value, "authenticator "); idx != -1 {
 				foundAuthenticator = true
 				authenticatorHeader = key
-				authenticatorValue = value
+				// 提取authenticator后面的key部分
+				startIdx := idx + len("authenticator ")
+				if startIdx < len(value) {
+					// 找到下一个空格或字符串结尾
+					endIdx := strings.Index(value[startIdx:], " ")
+					if endIdx == -1 {
+						authenticatorKey = value[startIdx:]
+					} else {
+						authenticatorKey = value[startIdx:startIdx+endIdx]
+					}
+				}
 				break
 			}
 		}
@@ -81,7 +92,7 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 		}
 	}
 	
-	if !foundAuthenticator {
+	if !foundAuthenticator || authenticatorKey == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": "Missing authenticator in request headers"})
 		return
@@ -124,24 +135,15 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 		return
 	}
 	
-	// 复制原始请求头，并替换包含authenticator的值
+	// 复制原始请求头，并替换authenticator key
 	for key, values := range c.Request.Header {
 		if strings.ToLower(key) != "host" {
 			for _, value := range values {
-				// 如果这个header包含authenticator，替换为账户ID
-				if key == authenticatorHeader && value == authenticatorValue {
-					// 根据不同格式处理替换
-					if strings.HasPrefix(value, "Bearer authenticator ") {
-						// Authorization: Bearer authenticator XXX -> Bearer account_id
-						proxyReq.Header.Add(key, "Bearer " + accountID)
-					} else if strings.HasPrefix(value, "authenticator ") {
-						// x-api-key: authenticator XXX -> account_id
-						proxyReq.Header.Add(key, accountID)
-					} else {
-						// 其他情况，直接替换authenticator部分
-						newValue := strings.Replace(value, "authenticator", accountID, 1)
-						proxyReq.Header.Add(key, newValue)
-					}
+				// 如果这个header包含authenticator key，替换为账户ID
+				if key == authenticatorHeader && strings.Contains(value, "authenticator "+authenticatorKey) {
+					// 简单替换：authenticator sk-ant-xxx -> account_id
+					newValue := strings.Replace(value, "authenticator "+authenticatorKey, accountID, 1)
+					proxyReq.Header.Add(key, newValue)
 				} else {
 					proxyReq.Header.Add(key, value)
 				}
@@ -169,17 +171,10 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 			for key, values := range c.Request.Header {
 				if strings.ToLower(key) != "host" {
 					for _, value := range values {
-						// 如果这个header包含authenticator，替换为新账户ID
-						if key == authenticatorHeader && value == authenticatorValue {
-							// 根据不同格式处理替换
-							if strings.HasPrefix(value, "Bearer authenticator ") {
-								retryReq.Header.Add(key, "Bearer " + retryAccountID)
-							} else if strings.HasPrefix(value, "authenticator ") {
-								retryReq.Header.Add(key, retryAccountID)
-							} else {
-								newValue := strings.Replace(value, "authenticator", retryAccountID, 1)
-								retryReq.Header.Add(key, newValue)
-							}
+						// 如果这个header包含authenticator key，替换为新账户ID
+						if key == authenticatorHeader && strings.Contains(value, "authenticator "+authenticatorKey) {
+							newValue := strings.Replace(value, "authenticator "+authenticatorKey, retryAccountID, 1)
+							retryReq.Header.Add(key, newValue)
 						} else {
 							retryReq.Header.Add(key, value)
 						}
@@ -226,17 +221,10 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 				for key, values := range c.Request.Header {
 					if strings.ToLower(key) != "host" {
 						for _, value := range values {
-							// 如果这个header包含authenticator，替换为新账户ID
-							if key == authenticatorHeader && value == authenticatorValue {
-								// 根据不同格式处理替换
-								if strings.HasPrefix(value, "Bearer authenticator ") {
-									retryReq.Header.Add(key, "Bearer " + retryAccountID)
-								} else if strings.HasPrefix(value, "authenticator ") {
-									retryReq.Header.Add(key, retryAccountID)
-								} else {
-									newValue := strings.Replace(value, "authenticator", retryAccountID, 1)
-									retryReq.Header.Add(key, newValue)
-								}
+							// 如果这个header包含authenticator key，替换为新账户ID
+							if key == authenticatorHeader && strings.Contains(value, "authenticator "+authenticatorKey) {
+								newValue := strings.Replace(value, "authenticator "+authenticatorKey, retryAccountID, 1)
+								retryReq.Header.Add(key, newValue)
 							} else {
 								retryReq.Header.Add(key, value)
 							}
