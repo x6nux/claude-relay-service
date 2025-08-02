@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   claude-middleware:
-    build: .
+    image: lfreea/claude-relay-service:middleware-latest
     ports:
       - "8080:8080"
     environment:
@@ -14,19 +14,27 @@ services:
       - REDIS_DB=0
       - TARGET_URL=http://claude-relay:3001
       - PROXY_TIMEOUT=300
+      - MIDDLEWARE_AUTH_ENABLED=${MIDDLEWARE_AUTH_ENABLED:-false}
+      - MIDDLEWARE_API_KEYS=${MIDDLEWARE_API_KEYS:-}
+      - MIDDLEWARE_API_KEY_PREFIX=${MIDDLEWARE_API_KEY_PREFIX:-cr_}
     depends_on:
       - redis
     restart: unless-stopped
     networks:
       - claude-network
 
-  # 可以添加到现有的docker-compose.yml中
-  # redis:
-  #   image: redis:7-alpine
-  #   ports:
-  #     - "6379:6379"
-  #   networks:
-  #     - claude-network
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - claude-network
+
+volumes:
+  redis_data:
 
 networks:
   claude-network:
