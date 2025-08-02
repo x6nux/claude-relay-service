@@ -452,6 +452,7 @@ func (s *Service) accountRefreshWorker() {
 	ticker := time.NewTicker(30 * time.Second) // 每30秒刷新一次
 	defer ticker.Stop()
 	
+	log.Printf("🔄 Started account refresh worker (refreshing every 30 seconds)")
 	for range ticker.C {
 		s.refreshAccounts()
 	}
