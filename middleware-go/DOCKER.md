@@ -3,7 +3,7 @@
 ## 🐳 Docker镜像
 
 ### 镜像信息
-- **镜像名称**: `ghcr.io/your-username/claude-relay-service`
+- **镜像名称**: `weishaw/claude-relay-service`
 - **中间层标签**: `middleware-latest`, `main-middleware`, `middleware-{sha}`
 - **架构支持**: `linux/amd64`, `linux/arm64`
 
@@ -17,7 +17,7 @@ docker run -d \
   -p 8080:8080 \
   -e TARGET_URL=http://localhost:3001 \
   -e REDIS_HOST=localhost \
-  ghcr.io/your-username/claude-relay-service:middleware-latest
+  weishaw/claude-relay-service:middleware-latest
 
 # 完整配置启动
 docker run -d \
@@ -31,7 +31,7 @@ docker run -d \
   -e REDIS_DB=0 \
   -e TARGET_URL=http://claude-relay:3001 \
   -e PROXY_TIMEOUT=300 \
-  ghcr.io/your-username/claude-relay-service:middleware-latest
+  weishaw/claude-relay-service:middleware-latest
 ```
 
 #### 2. 使用Docker Compose
@@ -39,7 +39,7 @@ docker run -d \
 
 ```bash
 # 下载部署文件
-curl -O https://github.com/your-username/claude-relay-service/releases/latest/download/docker-compose-middleware.yml
+curl -O https://github.com/weishaw/claude-relay-service/releases/latest/download/docker-compose-middleware.yml
 
 # 启动服务
 docker-compose -f docker-compose-middleware.yml up -d
@@ -52,7 +52,7 @@ services:
   # ... 现有服务
 
   claude-middleware:
-    image: ghcr.io/your-username/claude-relay-service:middleware-latest
+    image: weishaw/claude-relay-service:middleware-latest
     container_name: claude-middleware
     ports:
       - "8080:8080"
@@ -85,7 +85,7 @@ services:
 
 ```bash
 # 下载Kubernetes配置
-curl -O https://github.com/your-username/claude-relay-service/releases/latest/download/kubernetes-middleware.yml
+curl -O https://github.com/weishaw/claude-relay-service/releases/latest/download/kubernetes-middleware.yml
 
 # 部署到集群
 kubectl apply -f kubernetes-middleware.yml
@@ -174,7 +174,7 @@ kubectl top pods -l app=claude-middleware
 ### 调试模式
 ```bash
 # 启用调试日志
-docker run -e GIN_MODE=debug ghcr.io/your-username/claude-relay-service:middleware-latest
+docker run -e GIN_MODE=debug weishaw/claude-relay-service:middleware-latest
 ```
 
 ## 🚀 生产部署建议
