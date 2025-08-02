@@ -16,12 +16,33 @@ import (
 func main() {
 	// 初始化配置
 	cfg := config.Load()
+	
+	// 打印环境变量配置状态
+	log.Println("========================================")
+	log.Println("Claude Middleware Configuration Status")
+	log.Println("========================================")
+	log.Printf("Server Port: %d", cfg.Server.Port)
+	log.Printf("Server Mode: %s", cfg.Server.Mode)
+	log.Printf("Redis Host: %s", cfg.Redis.Host)
+	log.Printf("Redis Port: %s", cfg.Redis.Port)
+	log.Printf("Redis DB: %d", cfg.Redis.DB)
+	log.Printf("Redis Password: %s", func() string {
+		if cfg.Redis.Password == "" {
+			return "(not set)"
+		}
+		return "****"
+	}())
+	log.Printf("Target URL: %s", cfg.Proxy.TargetURL)
+	log.Printf("Proxy Timeout: %d seconds", cfg.Proxy.Timeout)
+	log.Println("========================================")
 
 	// 初始化Redis连接
+	log.Println("Connecting to Redis...")
 	redisClient, err := redis.NewClient(cfg.Redis)
 	if err != nil {
-		log.Fatalf("Failed to connect to Redis: %v", err)
+		log.Fatalf("❌ Failed to connect to Redis: %v", err)
 	}
+	log.Println("✅ Successfully connected to Redis")
 	defer redisClient.Close()
 
 	// 初始化代理服务
@@ -29,6 +50,25 @@ func main() {
 
 	// 初始化认证配置
 	authConfig := auth.NewAuthConfig()
+	
+	// 打印认证配置状态
+	log.Println("Authentication Configuration:")
+	log.Printf("Auth Enabled: %v", authConfig.Enabled)
+	log.Printf("API Key Prefix: %s", authConfig.Prefix)
+	if authConfig.Enabled {
+		log.Printf("Configured API Keys: %d keys", len(authConfig.APIKeys))
+		if len(authConfig.APIKeys) > 0 {
+			// 只显示key的前后几个字符
+			for i, key := range authConfig.APIKeys {
+				if len(key) > 10 {
+					log.Printf("  Key %d: %s...%s", i+1, key[:6], key[len(key)-4:])
+				} else {
+					log.Printf("  Key %d: (too short to display)", i+1)
+				}
+			}
+		}
+	}
+	log.Println("========================================")
 
 	// 设置Gin模式
 	if cfg.Server.Mode == "production" {
@@ -67,8 +107,16 @@ func main() {
 
 	// 启动服务器
 	port := strconv.Itoa(cfg.Server.Port)
-	log.Printf("Claude Middleware starting on port %s", port)
-	log.Printf("Proxying to: %s", cfg.Proxy.TargetURL)
+	log.Println("========================================")
+	log.Printf("🚀 Claude Middleware starting on port %s", port)
+	log.Printf("🎯 Proxying requests to: %s", cfg.Proxy.TargetURL)
+	log.Printf("🔐 Authentication: %s", func() string {
+		if authConfig.Enabled {
+			return "Enabled"
+		}
+		return "Disabled"
+	}())
+	log.Println("========================================")
 
 	if err := r.Run(":" + port); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
