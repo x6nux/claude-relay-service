@@ -1,6 +1,8 @@
 const express = require('express');
 const claudeRelayService = require('../services/claudeRelayService');
 const apiKeyService = require('../services/apiKeyService');
+const claudeAccountService = require('../services/claudeAccountService');
+const oauthHelper = require('../utils/oauthHelper');
 const { authenticateApiKey } = require('../middleware/auth');
 const logger = require('../utils/logger');
 const redis = require('../models/redis');
@@ -279,6 +281,346 @@ router.get('/v1/usage', authenticateApiKey, async (req, res) => {
     logger.error('❌ Usage stats error:', error);
     res.status(500).json({
       error: 'Failed to get usage stats',
+      message: error.message
+    });
+  }
+});
+
+// 🏢 Claude 账户管理 API 端点
+
+// 验证 API Key 是否有管理账户的权限
+// 可以通过以下方式授予权限：
+// 1. API Key 名称包含 "admin" 或 "manage"
+// 2. API Key 有特殊的前缀 cr_admin_
+// 3. API Key 在 description 中包含 [ACCOUNT_MANAGEMENT] 标记
+function checkAccountManagementPermission(req, res, next) {
+  const apiKey = req.apiKey;
+  
+  // 检查多种授权方式
+  const hasPermission = 
+    // 检查 API Key 名称
+    (apiKey.name && (apiKey.name.toLowerCase().includes('admin') || apiKey.name.toLowerCase().includes('manage'))) ||
+    // 检查 API Key 前缀（需要在生成时特殊处理）
+    (apiKey.key && apiKey.key.startsWith('cr_admin_')) ||
+    // 检查描述中的特殊标记
+    (apiKey.description && apiKey.description.includes('[ACCOUNT_MANAGEMENT]'));
+  
+  if (!hasPermission) {
+    return res.status(403).json({
+      error: 'Forbidden',
+      message: 'This API key does not have permission to manage accounts. Add [ACCOUNT_MANAGEMENT] to the key description or use an admin key.'
+    });
+  }
+  
+  next();
+}
+
+// 获取所有 Claude 账户
+router.get('/v1/accounts', authenticateApiKey, checkAccountManagementPermission, async (req, res) => {
+  try {
+    const accounts = await claudeAccountService.getAllAccounts();
+    
+    // 隐藏敏感信息
+    const sanitizedAccounts = accounts.map(account => ({
+      id: account.id,
+      name: account.name,
+      description: account.description,
+      email: account.email,
+      status: account.status,
+      isActive: account.isActive,
+      accountType: account.accountType,
+      createdAt: account.createdAt,
+      updatedAt: account.updatedAt,
+      lastUsedAt: account.lastUsedAt,
+      rateLimitStatus: account.rateLimitStatus,
+      proxy: account.proxy ? {
+        host: account.proxy.host,
+        port: account.proxy.port,
+        type: account.proxy.type
+      } : null
+    }));
+    
+    res.json({
+      success: true,
+      data: sanitizedAccounts
+    });
+  } catch (error) {
+    logger.error('❌ Failed to get Claude accounts via API:', error);
+    res.status(500).json({
+      error: 'Failed to get accounts',
+      message: error.message
+    });
+  }
+});
+
+// 创建新的 Claude 账户（支持 OAuth）
+router.post('/v1/accounts', authenticateApiKey, checkAccountManagementPermission, async (req, res) => {
+  try {
+    const {
+      name,
+      description,
+      email,
+      password,
+      refreshToken,
+      claudeAiOauth,
+      proxy,
+      accountType
+    } = req.body;
+
+    // 验证必填字段
+    if (!name) {
+      return res.status(400).json({ error: 'Name is required' });
+    }
+
+    // 验证 accountType 的有效性
+    if (accountType && !['shared', 'dedicated'].includes(accountType)) {
+      return res.status(400).json({ error: 'Invalid account type. Must be "shared" or "dedicated"' });
+    }
+
+    // 验证 OAuth 数据
+    if (claudeAiOauth) {
+      if (!claudeAiOauth.access_token || !claudeAiOauth.refresh_token) {
+        return res.status(400).json({ 
+          error: 'Invalid OAuth data. Both access_token and refresh_token are required' 
+        });
+      }
+    }
+
+    // 验证代理配置
+    if (proxy) {
+      if (!proxy.host || !proxy.port) {
+        return res.status(400).json({ 
+          error: 'Invalid proxy configuration. Host and port are required' 
+        });
+      }
+      if (proxy.type && !['http', 'https', 'socks5'].includes(proxy.type)) {
+        return res.status(400).json({ 
+          error: 'Invalid proxy type. Must be "http", "https", or "socks5"' 
+        });
+      }
+    }
+
+    const newAccount = await claudeAccountService.createAccount({
+      name,
+      description,
+      email,
+      password,
+      refreshToken,
+      claudeAiOauth,
+      proxy,
+      accountType: accountType || 'shared'
+    });
+
+    logger.success(`🏢 Account created via API: ${name} (${accountType || 'shared'})`);
+    
+    // 返回创建的账户信息（隐藏敏感数据）
+    res.json({
+      success: true,
+      data: {
+        id: newAccount.id,
+        name: newAccount.name,
+        description: newAccount.description,
+        email: newAccount.email,
+        accountType: newAccount.accountType,
+        status: newAccount.status,
+        createdAt: newAccount.createdAt
+      }
+    });
+  } catch (error) {
+    logger.error('❌ Failed to create Claude account via API:', error);
+    res.status(500).json({
+      error: 'Failed to create account',
+      message: error.message
+    });
+  }
+});
+
+// 更新 Claude 账户
+router.put('/v1/accounts/:accountId', authenticateApiKey, checkAccountManagementPermission, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const updates = req.body;
+
+    // 移除不允许通过 API 更新的字段
+    delete updates.id;
+    delete updates.createdAt;
+    delete updates.updatedAt;
+
+    // 验证更新字段
+    if (updates.accountType && !['shared', 'dedicated'].includes(updates.accountType)) {
+      return res.status(400).json({ error: 'Invalid account type' });
+    }
+
+    if (updates.proxy) {
+      if (!updates.proxy.host || !updates.proxy.port) {
+        return res.status(400).json({ 
+          error: 'Invalid proxy configuration. Host and port are required' 
+        });
+      }
+      if (updates.proxy.type && !['http', 'https', 'socks5'].includes(updates.proxy.type)) {
+        return res.status(400).json({ 
+          error: 'Invalid proxy type' 
+        });
+      }
+    }
+
+    await claudeAccountService.updateAccount(accountId, updates);
+    
+    logger.success(`📝 Account updated via API: ${accountId}`);
+    res.json({
+      success: true,
+      message: 'Account updated successfully'
+    });
+  } catch (error) {
+    logger.error('❌ Failed to update Claude account via API:', error);
+    res.status(500).json({
+      error: 'Failed to update account',
+      message: error.message
+    });
+  }
+});
+
+// 删除 Claude 账户
+router.delete('/v1/accounts/:accountId', authenticateApiKey, checkAccountManagementPermission, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    
+    await claudeAccountService.deleteAccount(accountId);
+    
+    logger.success(`🗑️ Account deleted via API: ${accountId}`);
+    res.json({
+      success: true,
+      message: 'Account deleted successfully'
+    });
+  } catch (error) {
+    logger.error('❌ Failed to delete Claude account via API:', error);
+    res.status(500).json({
+      error: 'Failed to delete account',
+      message: error.message
+    });
+  }
+});
+
+// OAuth 相关端点
+
+// 生成 OAuth 授权 URL
+router.post('/v1/accounts/oauth/generate-url', authenticateApiKey, checkAccountManagementPermission, async (req, res) => {
+  try {
+    const { proxy } = req.body;
+    const oauthParams = await oauthHelper.generateOAuthParams();
+    
+    // 创建 OAuth 会话
+    const sessionId = require('crypto').randomUUID();
+    await redis.setOAuthSession(sessionId, {
+      codeVerifier: oauthParams.codeVerifier,
+      state: oauthParams.state,
+      codeChallenge: oauthParams.codeChallenge,
+      proxy: proxy || null,
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString()
+    });
+    
+    logger.success('🔗 Generated OAuth authorization URL via API');
+    res.json({
+      success: true,
+      data: {
+        authUrl: oauthParams.authUrl,
+        sessionId: sessionId,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString()
+      }
+    });
+  } catch (error) {
+    logger.error('❌ Failed to generate OAuth URL via API:', error);
+    res.status(500).json({
+      error: 'Failed to generate OAuth URL',
+      message: error.message
+    });
+  }
+});
+
+// 交换授权码获取 token
+router.post('/v1/accounts/oauth/exchange-code', authenticateApiKey, checkAccountManagementPermission, async (req, res) => {
+  try {
+    const { sessionId, authorizationCode, callbackUrl } = req.body;
+    
+    if (!sessionId || (!authorizationCode && !callbackUrl)) {
+      return res.status(400).json({ 
+        error: 'Session ID and authorization code (or callback URL) are required' 
+      });
+    }
+    
+    // 从 Redis 获取 OAuth 会话信息
+    const oauthSession = await redis.getOAuthSession(sessionId);
+    if (!oauthSession) {
+      return res.status(400).json({ error: 'Invalid or expired OAuth session' });
+    }
+    
+    // 检查会话是否过期
+    if (new Date() > new Date(oauthSession.expiresAt)) {
+      await redis.deleteOAuthSession(sessionId);
+      return res.status(400).json({ error: 'OAuth session has expired' });
+    }
+    
+    // 处理授权码
+    let finalAuthCode;
+    const inputValue = callbackUrl || authorizationCode;
+    
+    try {
+      finalAuthCode = oauthHelper.parseCallbackUrl(inputValue);
+    } catch (parseError) {
+      return res.status(400).json({ 
+        error: 'Failed to parse authorization input',
+        message: parseError.message 
+      });
+    }
+    
+    // 交换访问令牌
+    const tokenData = await oauthHelper.exchangeCodeForTokens(
+      finalAuthCode,
+      oauthSession.codeVerifier,
+      oauthSession.state,
+      oauthSession.proxy
+    );
+    
+    // 清理 OAuth 会话
+    await redis.deleteOAuthSession(sessionId);
+    
+    logger.success('🎉 Successfully exchanged authorization code via API');
+    res.json({
+      success: true,
+      data: {
+        claudeAiOauth: tokenData
+      }
+    });
+  } catch (error) {
+    logger.error('❌ Failed to exchange authorization code via API:', error);
+    res.status(500).json({
+      error: 'Failed to exchange authorization code',
+      message: error.message
+    });
+  }
+});
+
+// 刷新账户 token
+router.post('/v1/accounts/:accountId/refresh', authenticateApiKey, checkAccountManagementPermission, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    
+    const result = await claudeAccountService.refreshAccountToken(accountId);
+    
+    logger.success(`🔄 Token refreshed via API for account: ${accountId}`);
+    res.json({
+      success: true,
+      data: {
+        accountId,
+        status: result.status,
+        refreshedAt: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    logger.error('❌ Failed to refresh account token via API:', error);
+    res.status(500).json({
+      error: 'Failed to refresh token',
       message: error.message
     });
   }
