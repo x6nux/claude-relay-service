@@ -13,6 +13,72 @@
 
 ## API 接口列表
 
+### 简化的OAuth账户创建（推荐）
+
+直接提供OAuth令牌创建账户，无需复杂的多步骤流程。
+
+```
+POST /api/v1/accounts/oauth/create
+X-API-Key: cr_your_api_key
+Content-Type: application/json
+```
+
+请求体：
+```json
+{
+  "name": "账户名称",
+  "description": "账户描述（可选）",
+  "accessToken": "你的access_token",
+  "refreshToken": "你的refresh_token",
+  "expiresIn": 3600,  // 可选，默认3600秒
+  "scopes": "org:create_api_key user:profile user:inference",  // 可选
+  "accountType": "shared",  // 可选: "shared" 或 "dedicated"
+  "proxy": {  // 可选
+    "type": "socks5",
+    "host": "127.0.0.1",
+    "port": 1080,
+    "username": "proxy_user",
+    "password": "proxy_pass"
+  }
+}
+```
+
+成功响应：
+```json
+{
+  "success": true,
+  "data": {
+    "id": "账户ID",
+    "name": "账户名称",
+    "description": "账户描述",
+    "accountType": "shared",
+    "status": "active",
+    "createdAt": "2024-01-01T00:00:00.000Z",
+    "expiresAt": "2024-01-01T01:00:00.000Z"
+  }
+}
+```
+
+使用示例（Python）：
+```python
+import requests
+
+url = "https://your-server.com/api/v1/accounts/oauth/create"
+headers = {
+    "X-API-Key": "cr_your_api_key",
+    "Content-Type": "application/json"
+}
+data = {
+    "name": "Test Account",
+    "accessToken": "sk-ant-...",
+    "refreshToken": "refresh_token_here",
+    "accountType": "shared"
+}
+
+response = requests.post(url, json=data, headers=headers)
+print(response.json())
+```
+
 ### 获取所有账户
 ```
 GET /api/v1/accounts

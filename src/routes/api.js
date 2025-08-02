@@ -503,6 +503,74 @@ router.delete('/v1/accounts/:accountId', authenticateApiKey, checkAccountManagem
 
 // OAuth 相关端点
 
+// 简化的OAuth账号创建端点 - 直接提供OAuth数据
+router.post('/v1/accounts/oauth/create', authenticateApiKey, checkAccountManagementPermission, async (req, res) => {
+  try {
+    const {
+      name,
+      description,
+      proxy,
+      accountType,
+      // OAuth 数据
+      accessToken,
+      refreshToken,
+      expiresIn = 3600,
+      scopes = 'org:create_api_key user:profile user:inference'
+    } = req.body;
+
+    // 验证必填字段
+    if (!name) {
+      return res.status(400).json({ error: 'Name is required' });
+    }
+
+    if (!accessToken || !refreshToken) {
+      return res.status(400).json({ 
+        error: 'Both accessToken and refreshToken are required' 
+      });
+    }
+
+    // 构造Claude格式的OAuth数据
+    const claudeAiOauth = {
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      token_type: 'Bearer',
+      expires_in: expiresIn,
+      scope: scopes,
+      expires_at: new Date(Date.now() + expiresIn * 1000).toISOString()
+    };
+
+    // 创建账户
+    const newAccount = await claudeAccountService.createAccount({
+      name,
+      description: description || '',
+      claudeAiOauth,
+      proxy,
+      accountType: accountType || 'shared'
+    });
+
+    logger.success(`🏢 OAuth account created via simplified API: ${name}`);
+    
+    res.json({
+      success: true,
+      data: {
+        id: newAccount.id,
+        name: newAccount.name,
+        description: newAccount.description,
+        accountType: newAccount.accountType,
+        status: newAccount.status,
+        createdAt: newAccount.createdAt,
+        expiresAt: newAccount.expiresAt
+      }
+    });
+  } catch (error) {
+    logger.error('❌ Failed to create OAuth account via simplified API:', error);
+    res.status(500).json({
+      error: 'Failed to create OAuth account',
+      message: error.message
+    });
+  }
+});
+
 // 生成 OAuth 授权 URL
 router.post('/v1/accounts/oauth/generate-url', authenticateApiKey, checkAccountManagementPermission, async (req, res) => {
   try {
