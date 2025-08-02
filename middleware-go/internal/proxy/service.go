@@ -62,72 +62,9 @@ func NewService(redisClient *redis.Client, cfg *config.Config) *Service {
 
 // ProxyHandler 处理所有代理请求
 func (s *Service) ProxyHandler(c *gin.Context) {
-	// 查找包含 Claude API key 的请求头
-	var foundAPIKey bool
-	var apiKeyHeader string
-	var apiKey string
-	
-	// Claude API keys 通常以 sk-ant- 开头
-	for key, values := range c.Request.Header {
-		for _, value := range values {
-			// 支持多种格式：
-			// 1. x-api-key: sk-ant-xxx
-			// 2. Authorization: Bearer sk-ant-xxx
-			// 3. x-api-key: authenticator sk-ant-xxx (兼容旧格式)
-			
-			// 先尝试直接查找 sk-ant- 格式
-			if idx := strings.Index(value, "sk-ant-"); idx != -1 {
-				foundAPIKey = true
-				apiKeyHeader = key
-				// 提取完整的 API key
-				startIdx := idx
-				endIdx := strings.Index(value[startIdx:], " ")
-				if endIdx == -1 {
-					apiKey = value[startIdx:]
-				} else {
-					apiKey = value[startIdx:startIdx+endIdx]
-				}
-				break
-			}
-			
-			// 兼容 authenticator 格式
-			if idx := strings.Index(value, "authenticator "); idx != -1 {
-				foundAPIKey = true
-				apiKeyHeader = key
-				// 提取authenticator后面的key部分
-				startIdx := idx + len("authenticator ")
-				if startIdx < len(value) {
-					endIdx := strings.Index(value[startIdx:], " ")
-					if endIdx == -1 {
-						apiKey = value[startIdx:]
-					} else {
-						apiKey = value[startIdx:startIdx+endIdx]
-					}
-				}
-				break
-			}
-		}
-		if foundAPIKey {
-			break
-		}
-	}
-	
-	if !foundAPIKey || apiKey == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error": "Missing API key in request headers",
-			"message": "Please provide a Claude API key (sk-ant-xxx) in x-api-key or Authorization header",
-			"supported_formats": []string{
-				"x-api-key: sk-ant-xxx",
-				"Authorization: Bearer sk-ant-xxx", 
-				"x-api-key: authenticator sk-ant-xxx",
-			},
-		})
-		return
-	}
-	
 	// 记录请求路径
 	requestPath := c.Request.URL.Path
-	log.Printf("Processing request: %s %s (found API key in header: %s)", c.Request.Method, requestPath, apiKeyHeader)
+	log.Printf("Processing request: %s %s", c.Request.Method, requestPath)
 	
 	// 选择可用的Claude账户ID
 	accountID, err := s.selectAvailableAccount()
@@ -137,6 +74,8 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 			"error": "No available Claude accounts"})
 		return
 	}
+	
+	log.Printf("Selected account %s for %s", accountID, requestPath)
 	
 	// 读取请求体
 	bodyBytes, err := io.ReadAll(c.Request.Body)
@@ -162,20 +101,22 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 		return
 	}
 	
-	// 复制原始请求头，并替换API key
+	// 复制原始请求头，并设置x-api-key为账户ID
 	for key, values := range c.Request.Header {
-		if strings.ToLower(key) != "host" {
+		if strings.ToLower(key) == "x-api-key" {
+			// 替换x-api-key为账户ID
+			proxyReq.Header.Set("x-api-key", accountID)
+		} else if strings.ToLower(key) != "host" {
+			// 复制其他请求头（除了host）
 			for _, value := range values {
-				// 如果这个header包含API key，替换为账户ID
-				if key == apiKeyHeader && strings.Contains(value, apiKey) {
-					// 简单替换：sk-ant-xxx -> account_id
-					newValue := strings.Replace(value, apiKey, accountID, 1)
-					proxyReq.Header.Add(key, newValue)
-				} else {
-					proxyReq.Header.Add(key, value)
-				}
+				proxyReq.Header.Add(key, value)
 			}
 		}
+	}
+	
+	// 如果原始请求没有x-api-key，添加一个
+	if proxyReq.Header.Get("x-api-key") == "" {
+		proxyReq.Header.Set("x-api-key", accountID)
 	}
 	
 	// 设置正确的Host
@@ -196,17 +137,16 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 			// 重新创建请求
 			retryReq, _ := http.NewRequest(c.Request.Method, targetURL.String(), bytes.NewReader(bodyBytes))
 			for key, values := range c.Request.Header {
-				if strings.ToLower(key) != "host" {
+				if strings.ToLower(key) == "x-api-key" {
+					retryReq.Header.Set("x-api-key", retryAccountID)
+				} else if strings.ToLower(key) != "host" {
 					for _, value := range values {
-						// 如果这个header包含API key，替换为新账户ID
-						if key == apiKeyHeader && strings.Contains(value, apiKey) {
-							newValue := strings.Replace(value, apiKey, retryAccountID, 1)
-							retryReq.Header.Add(key, newValue)
-						} else {
-							retryReq.Header.Add(key, value)
-						}
+						retryReq.Header.Add(key, value)
 					}
 				}
+			}
+			if retryReq.Header.Get("x-api-key") == "" {
+				retryReq.Header.Set("x-api-key", retryAccountID)
 			}
 			retryReq.Host = s.targetURL.Host
 			
@@ -246,17 +186,16 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 				// 重新创建请求
 				retryReq, _ := http.NewRequest(c.Request.Method, targetURL.String(), bytes.NewReader(bodyBytes))
 				for key, values := range c.Request.Header {
-					if strings.ToLower(key) != "host" {
+					if strings.ToLower(key) == "x-api-key" {
+						retryReq.Header.Set("x-api-key", retryAccountID)
+					} else if strings.ToLower(key) != "host" {
 						for _, value := range values {
-							// 如果这个header包含API key，替换为新账户ID
-							if key == apiKeyHeader && strings.Contains(value, apiKey) {
-								newValue := strings.Replace(value, apiKey, retryAccountID, 1)
-								retryReq.Header.Add(key, newValue)
-							} else {
-								retryReq.Header.Add(key, value)
-							}
+							retryReq.Header.Add(key, value)
 						}
 					}
+				}
+				if retryReq.Header.Get("x-api-key") == "" {
+					retryReq.Header.Set("x-api-key", retryAccountID)
 				}
 				retryReq.Host = s.targetURL.Host
 				

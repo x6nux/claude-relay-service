@@ -10,7 +10,7 @@
 - **故障转移**: 自动检测并排除限流或异常账户  
 - **限流处理**: 自动标记和恢复限流账户（1小时恢复）
 - **请求转发**: 透明代理所有API请求到后端服务
-- **请求头替换**: 自动在任何请求头中查找并替换`authenticator`格式为账户ID
+- **请求头处理**: 将`x-api-key`设置为选中的账户ID（无论原始值是什么）
 - **Redis只读**: 不修改Redis中的数据，保持数据完整性
 - **API认证**: 支持可选的API Key认证机制，防止服务滥用
 
@@ -18,13 +18,13 @@
 
 ```
 客户端请求 → Go中间层 → Node.js服务 → Anthropic API
+(x-api-key: 任意值) → (x-api-key: account_id) → (OAuth Bearer Token)
 
 Go中间层特点:
 - 从Redis只读获取账户信息
 - 在内存中管理账户状态（限流、问题标记）
-- 自动扫描所有请求头，查找 Claude API key (sk-ant-xxx)
-- 支持多种格式：直接的 sk-ant-xxx 或 authenticator sk-ant-xxx
-- 将找到的 API key 替换为选中的账户ID
+- 将x-api-key设置为选中的账户ID
+- 客户端可以发送任意x-api-key值，中间层会替换
 - 重启后状态重置，避免僵尸状态
 ```
 
@@ -126,22 +126,16 @@ CMD ["./claude-middleware"]
 # 场景1：禁用中间层认证（开发/内网环境）
 MIDDLEWARE_AUTH_ENABLED=false
 
-# 请求示例（支持多种格式）：
-# 方式1: 使用x-api-key
+# 请求示例：
+# 客户端可以发送任意x-api-key值
+curl -X POST http://localhost:8080/api/v1/messages \
+  -H "x-api-key: anything" \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "Hello"}]}'
+
+# 或者使用真实的API key（中间层会忽略并替换）
 curl -X POST http://localhost:8080/api/v1/messages \
   -H "x-api-key: sk-ant-xxx" \
-  -H "Content-Type: application/json" \
-  -d '{"messages": [{"role": "user", "content": "Hello"}]}'
-
-# 方式2: 使用Authorization Bearer
-curl -X POST http://localhost:8080/api/v1/messages \
-  -H "Authorization: Bearer sk-ant-xxx" \
-  -H "Content-Type: application/json" \
-  -d '{"messages": [{"role": "user", "content": "Hello"}]}'
-
-# 方式3: 兼容旧格式 (authenticator前缀)
-curl -X POST http://localhost:8080/api/v1/messages \
-  -H "x-api-key: authenticator sk-ant-xxx" \
   -H "Content-Type: application/json" \
   -d '{"messages": [{"role": "user", "content": "Hello"}]}'
 
@@ -158,11 +152,10 @@ curl -X POST http://localhost:8080/api/v1/messages \
 ```
 
 **注意事项**：
-- 中间层会扫描所有请求头，查找 Claude API key (sk-ant-xxx)
-- 支持标准格式 `Authorization: Bearer sk-ant-xxx` 和 `x-api-key: sk-ant-xxx`
-- 兼容旧格式 `authenticator sk-ant-xxx`
+- 中间层会自动将x-api-key设置为选中的账户ID
+- 客户端发送的x-api-key值会被忽略（但必须存在）
 - 中间层认证key使用`cr_`前缀（仅在启用认证时需要）
-- 找到的 API key 会被替换为选中的账户ID后转发
+- 如果请求没有x-api-key，中间层会自动添加
 
 ## 负载均衡策略
 
