@@ -268,6 +268,14 @@ const app = createApp({
                 code: ''
             },
             
+            // 编辑账户时的OAuth数据
+            editOauthData: {
+                sessionId: '',
+                authUrl: '',
+                callbackUrl: ''
+            },
+            editAuthUrlLoading: false,
+            
             // 用户菜单和账户修改相关
             userMenuOpen: false,
             currentUser: {
@@ -978,6 +986,13 @@ const app = createApp({
                 proxyPassword: '',
                 projectId: '' // 重置项目编号
             };
+            // 重置编辑OAuth数据
+            this.editOauthData = {
+                sessionId: '',
+                authUrl: '',
+                callbackUrl: ''
+            };
+            this.editAuthUrlLoading = false;
         },
         
         // 更新账户
@@ -1223,6 +1238,53 @@ const app = createApp({
                 this.showToast('生成失败，请检查网络连接', 'error', '网络错误');
             } finally {
                 this.authUrlLoading = false;
+            }
+        },
+        
+        // 生成编辑账户的OAuth授权URL
+        async generateEditAuthUrl() {
+            this.editAuthUrlLoading = true;
+            try {
+                // 获取编辑表单中的代理配置
+                let proxy = null;
+                if (this.editAccountForm.proxyType) {
+                    proxy = {
+                        type: this.editAccountForm.proxyType,
+                        host: this.editAccountForm.proxyHost,
+                        port: parseInt(this.editAccountForm.proxyPort),
+                        username: this.editAccountForm.proxyUsername || null,
+                        password: this.editAccountForm.proxyPassword || null
+                    };
+                }
+
+                const endpoint = this.editAccountForm.platform === 'gemini' 
+                    ? '/admin/gemini-accounts/generate-auth-url'
+                    : '/admin/claude-accounts/generate-auth-url';
+
+                const data = await this.apiRequest(endpoint, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        proxy: proxy
+                    })
+                });
+                
+                if (!data) {
+                    // 如果token过期，apiRequest会返回null并刷新页面
+                    return;
+                }
+                
+                if (data.success) {
+                    this.editOauthData.authUrl = data.data.authUrl;
+                    this.editOauthData.sessionId = data.data.sessionId;
+                    this.showToast('授权链接生成成功！', 'success', '生成成功');
+                } else {
+                    this.showToast(data.message || '生成失败', 'error', '生成失败');
+                }
+            } catch (error) {
+                console.error('Error generating edit auth URL:', error);
+                this.showToast('生成失败，请检查网络连接', 'error', '网络错误');
+            } finally {
+                this.editAuthUrlLoading = false;
             }
         },
         
