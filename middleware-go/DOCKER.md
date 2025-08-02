@@ -4,7 +4,12 @@
 
 ### 镜像信息
 - **镜像名称**: `lfreea/claude-relay-service`
-- **中间层标签**: `middleware-latest`, `main-middleware`, `middleware-{sha}`
+- **中间层标签**: 
+  - `middleware-latest` - 最新版本
+  - `middleware-X.Y.Z` - 版本标签（如 `middleware-1.2.6`）
+  - `main-middleware` - 主分支版本
+  - `{branch}-middleware` - 特定分支版本
+  - `{branch}-middleware-{sha}` - 特定提交版本
 - **架构支持**: `linux/amd64`, `linux/arm64`
 
 ### 快速启动

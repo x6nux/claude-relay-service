@@ -39,6 +39,13 @@ jobs:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+    - name: Get version
+      id: version
+      run: |
+        VERSION=$(cat VERSION | tr -d '\n')
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Current version: $VERSION"
+
     - name: Extract metadata
       id: meta
       uses: docker/metadata-action@v5
@@ -49,9 +56,11 @@ jobs:
           type=ref,event=pr,suffix=-middleware
           type=sha,prefix={{branch}}-middleware-,format=short
           type=raw,value=middleware-latest,enable={{is_default_branch}}
+          type=raw,value=middleware-${{ steps.version.outputs.version }},enable={{is_default_branch}}
         labels: |
           org.opencontainers.image.description=Claude API middleware layer for load balancing and failover
           org.opencontainers.image.vendor=Claude Relay Service
+          org.opencontainers.image.version=${{ steps.version.outputs.version }}
           middleware.component=go-proxy
           middleware.feature=load-balancer
 
@@ -206,10 +215,20 @@ jobs:
         echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
         echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Version Information" >> $GITHUB_STEP_SUMMARY
+        echo "- Current Version: **${{ steps.version.outputs.version }}**" >> $GITHUB_STEP_SUMMARY
+        echo "- Latest Tag: \`middleware-latest\`" >> $GITHUB_STEP_SUMMARY
+        echo "- Version Tag: \`middleware-${{ steps.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
         echo "### Quick Start" >> $GITHUB_STEP_SUMMARY
         echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-        echo "# Pull and run the middleware" >> $GITHUB_STEP_SUMMARY
+        echo "# Pull and run the middleware (latest)" >> $GITHUB_STEP_SUMMARY
         echo "docker pull ${{ secrets.DOCKERHUB_USERNAME || 'lfreea' }}/${{ env.IMAGE_NAME }}:middleware-latest" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "# Pull and run specific version" >> $GITHUB_STEP_SUMMARY
+        echo "docker pull ${{ secrets.DOCKERHUB_USERNAME || 'lfreea' }}/${{ env.IMAGE_NAME }}:middleware-${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "# Run the middleware" >> $GITHUB_STEP_SUMMARY
         echo "docker run -p 8080:8080 -e TARGET_URL=http://localhost:3001 -e REDIS_HOST=localhost ${{ secrets.DOCKERHUB_USERNAME || 'lfreea' }}/${{ env.IMAGE_NAME }}:middleware-latest" >> $GITHUB_STEP_SUMMARY
         echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY

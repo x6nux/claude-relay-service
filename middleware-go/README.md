@@ -71,6 +71,9 @@ go build -o claude-middleware .
 # 拉取最新的中间层镜像
 docker pull lfreea/claude-relay-service:middleware-latest
 
+# 或拉取特定版本
+docker pull lfreea/claude-relay-service:middleware-1.2.6
+
 # 快速启动
 docker run -d \
   --name claude-middleware \
@@ -84,7 +87,8 @@ curl http://localhost:8080/health
 ```
 
 ### 🏷️ 可用镜像标签
-- `middleware-latest` - 主分支最新版本
+- `middleware-latest` - 主分支最新版本（推荐）
+- `middleware-X.Y.Z` - 特定版本（如 `middleware-1.2.6`）
 - `main-middleware` - 主分支稳定版本  
 - `{branch}-middleware` - 特定分支版本
 - `{branch}-middleware-{sha}` - 特定提交版本
