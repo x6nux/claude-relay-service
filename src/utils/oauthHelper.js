@@ -142,7 +142,18 @@ async function exchangeCodeForTokens(authorizationCode, codeVerifier, state, pro
             codeLength: cleanedCode.length,
             codePrefix: cleanedCode.substring(0, 10) + '...',
             hasProxy: !!proxyConfig,
-            proxyType: proxyConfig?.type || 'none'
+            proxyType: proxyConfig?.type || 'none',
+            // 添加更多调试信息
+            params: {
+                client_id: params.client_id,
+                redirect_uri: params.redirect_uri,
+                code_length: params.code.length,
+                code_prefix: params.code.substring(0, 10) + '...',
+                has_code_verifier: !!params.code_verifier,
+                code_verifier_length: params.code_verifier ? params.code_verifier.length : 0,
+                has_state: !!params.state,
+                state_length: params.state ? params.state.length : 0
+            }
         });
 
         const response = await axios.post(OAUTH_CONFIG.TOKEN_URL, params, {

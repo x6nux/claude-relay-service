@@ -642,6 +642,20 @@ router.post('/v1/accounts/oauth/exchange-code', authenticateApiKey, checkAccount
       });
     }
     
+    // 检查授权码是否已经使用过（通过在Redis中标记）
+    const usedCodeKey = `oauth:used_code:${finalAuthCode}`;
+    const isUsed = await redis.getClient().get(usedCodeKey);
+    
+    if (isUsed) {
+      return res.status(400).json({ 
+        error: 'Authorization code has already been used',
+        message: 'Each authorization code can only be used once. Please generate a new authorization URL and try again.'
+      });
+    }
+    
+    // 标记授权码为已使用（设置15分钟过期，比授权码有效期略长）
+    await redis.getClient().set(usedCodeKey, '1', 'EX', 900);
+    
     // 交换访问令牌
     const tokenData = await oauthHelper.exchangeCodeForTokens(
       finalAuthCode,
