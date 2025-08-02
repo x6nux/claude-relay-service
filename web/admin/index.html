@@ -985,6 +985,13 @@
                                     <option value="lastUsed">按最后使用排序</option>
                                 </select>
                                 <button 
+                                    @click.stop="copyAllAccountIds"
+                                    class="btn btn-secondary px-4 py-3 flex items-center gap-2"
+                                    :disabled="accounts.length === 0"
+                                >
+                                    <i class="fas fa-copy"></i>复制所有ID
+                                </button>
+                                <button 
                                     @click.stop="openCreateAccountModal"
                                     class="btn btn-success px-6 py-3 flex items-center gap-2"
                                 >

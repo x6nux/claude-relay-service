@@ -606,6 +606,35 @@ const app = createApp({
             }
         },
         
+        // 复制所有账号ID
+        copyAllAccountIds() {
+            if (this.accounts.length === 0) {
+                this.showToast('没有可复制的账号ID', 'warning');
+                return;
+            }
+            
+            // 收集所有账号ID，每行一个
+            const accountIds = this.accounts.map(account => account.id).join('\n');
+            
+            // 创建临时文本域用于复制
+            const textarea = document.createElement('textarea');
+            textarea.value = accountIds;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            
+            try {
+                textarea.select();
+                document.execCommand('copy');
+                this.showToast(`已复制 ${this.accounts.length} 个账号ID到剪贴板`, 'success');
+            } catch (err) {
+                console.error('复制失败:', err);
+                this.showToast('复制失败，请手动复制', 'error');
+            } finally {
+                document.body.removeChild(textarea);
+            }
+        },
+        
         // API Keys列表排序
         sortApiKeys(field) {
             if (this.apiKeysSortBy === field) {
