@@ -206,6 +206,37 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
+    # 构建Go中间层Docker镜像
+    - name: Check if middleware exists
+      if: steps.check.outputs.needs_bump == 'true'
+      id: check_middleware
+      run: |
+        if [ -d "middleware-go" ]; then
+          echo "exists=true" >> $GITHUB_OUTPUT
+        else
+          echo "exists=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Build and push Middleware Docker image
+      if: steps.check.outputs.needs_bump == 'true' && steps.check_middleware.outputs.exists == 'true'
+      uses: docker/build-push-action@v5
+      with:
+        context: ./middleware-go
+        file: ./middleware-go/Dockerfile
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: |
+          ${{ secrets.DOCKERHUB_USERNAME }}/claude-relay-service:middleware-${{ steps.next_version.outputs.new_tag }}
+          ${{ secrets.DOCKERHUB_USERNAME }}/claude-relay-service:middleware-latest
+          ${{ secrets.DOCKERHUB_USERNAME }}/claude-relay-service:middleware-${{ steps.next_version.outputs.new_version }}
+        labels: |
+          org.opencontainers.image.version=${{ steps.next_version.outputs.new_version }}
+          org.opencontainers.image.revision=${{ github.sha }}
+          org.opencontainers.image.description=Claude API middleware layer for load balancing and failover
+          middleware.component=go-proxy
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
     - name: Send Telegram Notification
       if: steps.check.outputs.needs_bump == 'true' && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''
       env:
