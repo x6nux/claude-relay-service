@@ -62,24 +62,34 @@ func NewService(redisClient *redis.Client, cfg *config.Config) *Service {
 
 // ProxyHandler 处理所有代理请求
 func (s *Service) ProxyHandler(c *gin.Context) {
-	// 提取原始的 x-api-key
-	originalAPIKey := c.GetHeader("x-api-key")
-	if originalAPIKey == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error": "Missing x-api-key header"})
-		return
+	// 查找包含authenticator的请求头
+	var foundAuthenticator bool
+	var authenticatorHeader string
+	var authenticatorValue string
+	
+	for key, values := range c.Request.Header {
+		for _, value := range values {
+			if strings.Contains(value, "authenticator ") {
+				foundAuthenticator = true
+				authenticatorHeader = key
+				authenticatorValue = value
+				break
+			}
+		}
+		if foundAuthenticator {
+			break
+		}
 	}
 	
-	// 验证API Key格式是否为authenticator格式
-	if !strings.HasPrefix(originalAPIKey, "authenticator ") {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid API key format, expected 'authenticator' prefix"})
+	if !foundAuthenticator {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "Missing authenticator in request headers"})
 		return
 	}
 	
 	// 记录请求路径
 	requestPath := c.Request.URL.Path
-	log.Printf("Processing request: %s %s", c.Request.Method, requestPath)
+	log.Printf("Processing request: %s %s (found authenticator in header: %s)", c.Request.Method, requestPath, authenticatorHeader)
 	
 	// 选择可用的Claude账户ID
 	accountID, err := s.selectAvailableAccount()
@@ -114,15 +124,27 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 		return
 	}
 	
-	// 复制原始请求头，但替换x-api-key
+	// 复制原始请求头，并替换包含authenticator的值
 	for key, values := range c.Request.Header {
-		if strings.ToLower(key) == "x-api-key" {
-			// 替换为账户ID
-			proxyReq.Header.Set(key, accountID)
-		} else if strings.ToLower(key) != "host" {
-			// 复制其他请求头（除了host）
+		if strings.ToLower(key) != "host" {
 			for _, value := range values {
-				proxyReq.Header.Add(key, value)
+				// 如果这个header包含authenticator，替换为账户ID
+				if key == authenticatorHeader && value == authenticatorValue {
+					// 根据不同格式处理替换
+					if strings.HasPrefix(value, "Bearer authenticator ") {
+						// Authorization: Bearer authenticator XXX -> Bearer account_id
+						proxyReq.Header.Add(key, "Bearer " + accountID)
+					} else if strings.HasPrefix(value, "authenticator ") {
+						// x-api-key: authenticator XXX -> account_id
+						proxyReq.Header.Add(key, accountID)
+					} else {
+						// 其他情况，直接替换authenticator部分
+						newValue := strings.Replace(value, "authenticator", accountID, 1)
+						proxyReq.Header.Add(key, newValue)
+					}
+				} else {
+					proxyReq.Header.Add(key, value)
+				}
 			}
 		}
 	}
@@ -145,11 +167,22 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 			// 重新创建请求
 			retryReq, _ := http.NewRequest(c.Request.Method, targetURL.String(), bytes.NewReader(bodyBytes))
 			for key, values := range c.Request.Header {
-				if strings.ToLower(key) == "x-api-key" {
-					retryReq.Header.Set(key, retryAccountID)
-				} else if strings.ToLower(key) != "host" {
+				if strings.ToLower(key) != "host" {
 					for _, value := range values {
-						retryReq.Header.Add(key, value)
+						// 如果这个header包含authenticator，替换为新账户ID
+						if key == authenticatorHeader && value == authenticatorValue {
+							// 根据不同格式处理替换
+							if strings.HasPrefix(value, "Bearer authenticator ") {
+								retryReq.Header.Add(key, "Bearer " + retryAccountID)
+							} else if strings.HasPrefix(value, "authenticator ") {
+								retryReq.Header.Add(key, retryAccountID)
+							} else {
+								newValue := strings.Replace(value, "authenticator", retryAccountID, 1)
+								retryReq.Header.Add(key, newValue)
+							}
+						} else {
+							retryReq.Header.Add(key, value)
+						}
 					}
 				}
 			}
@@ -191,11 +224,22 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 				// 重新创建请求
 				retryReq, _ := http.NewRequest(c.Request.Method, targetURL.String(), bytes.NewReader(bodyBytes))
 				for key, values := range c.Request.Header {
-					if strings.ToLower(key) == "x-api-key" {
-						retryReq.Header.Set(key, retryAccountID)
-					} else if strings.ToLower(key) != "host" {
+					if strings.ToLower(key) != "host" {
 						for _, value := range values {
-							retryReq.Header.Add(key, value)
+							// 如果这个header包含authenticator，替换为新账户ID
+							if key == authenticatorHeader && value == authenticatorValue {
+								// 根据不同格式处理替换
+								if strings.HasPrefix(value, "Bearer authenticator ") {
+									retryReq.Header.Add(key, "Bearer " + retryAccountID)
+								} else if strings.HasPrefix(value, "authenticator ") {
+									retryReq.Header.Add(key, retryAccountID)
+								} else {
+									newValue := strings.Replace(value, "authenticator", retryAccountID, 1)
+									retryReq.Header.Add(key, newValue)
+								}
+							} else {
+								retryReq.Header.Add(key, value)
+							}
 						}
 					}
 				}

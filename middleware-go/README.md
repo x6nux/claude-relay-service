@@ -10,7 +10,7 @@
 - **故障转移**: 自动检测并排除限流或异常账户  
 - **限流处理**: 自动标记和恢复限流账户（1小时恢复）
 - **请求转发**: 透明代理所有API请求到后端服务
-- **请求头替换**: 将`x-api-key`从`authenticator`格式替换为账户ID
+- **请求头替换**: 自动在任何请求头中查找并替换`authenticator`格式为账户ID
 - **Redis只读**: 不修改Redis中的数据，保持数据完整性
 - **API认证**: 支持可选的API Key认证机制，防止服务滥用
 
@@ -18,12 +18,12 @@
 
 ```
 客户端请求 → Go中间层 → Node.js服务 → Anthropic API
-(x-api-key: authenticator XXX) → (x-api-key: account_id) → (OAuth Bearer Token)
 
 Go中间层特点:
 - 从Redis只读获取账户信息
 - 在内存中管理账户状态（限流、问题标记）
-- 不修改Redis数据，保持数据完整性
+- 自动在任何请求头中查找包含"authenticator"的值并替换为账户ID
+- 支持灵活的请求头格式（x-api-key、Authorization Bearer等）
 - 重启后状态重置，避免僵尸状态
 ```
 
@@ -116,37 +116,51 @@ CMD ["./claude-middleware"]
 
 ### 🔑 认证配置示例
 
-```bash
-# 启用API Key认证
-MIDDLEWARE_AUTH_ENABLED=true
+中间层支持两层认证：
 
-# 配置允许的API Keys（实际使用中应该是更安全的keys）
-MIDDLEWARE_API_KEYS="cr_your_api_key_1,cr_your_api_key_2,cr_your_api_key_3"
-
-# 自定义API Key前缀（默认为cr_）
-MIDDLEWARE_API_KEY_PREFIX=cr_
-```
-
-**安全建议**：
-- 生产环境中务必启用认证功能
-- 使用强随机API Keys，至少32字符
-- 定期轮换API Keys
-- 不要在日志中记录完整的API Key
-
-### 🔓 认证工作流程
-
-1. **请求验证**: 客户端发送带有`x-api-key`头的请求
-2. **格式检查**: 验证API Key格式和前缀
-3. **权限验证**: 检查API Key是否在允许列表中
-4. **请求转发**: 认证成功后转发到后端服务
+1. **中间层认证**（可选）：保护中间层服务不被滥用
+2. **Claude API认证**（必需）：用于转发到后端的Claude账户认证
 
 ```bash
-# 客户端请求示例
+# 场景1：禁用中间层认证（开发/内网环境）
+MIDDLEWARE_AUTH_ENABLED=false
+
+# 请求示例（支持多种格式）：
+# 方式1: 使用x-api-key
 curl -X POST http://localhost:8080/api/v1/messages \
-  -H "x-api-key: cr_your_api_key_here" \
+  -H "x-api-key: authenticator YOUR_CLAUDE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "Hello"}]}'
+
+# 方式2: 使用Authorization Bearer
+curl -X POST http://localhost:8080/api/v1/messages \
+  -H "Authorization: Bearer authenticator YOUR_CLAUDE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "Hello"}]}'
+
+# 方式3: 使用任意自定义header
+curl -X POST http://localhost:8080/api/v1/messages \
+  -H "Custom-Auth-Header: authenticator YOUR_CLAUDE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "Hello"}]}'
+
+# 场景2：启用中间层认证（生产环境推荐）
+MIDDLEWARE_AUTH_ENABLED=true
+MIDDLEWARE_API_KEYS="cr_your_middleware_key_1,cr_your_middleware_key_2"
+
+# 请求示例（需要两个key）：
+curl -X POST http://localhost:8080/api/v1/messages \
+  -H "x-api-key: cr_your_middleware_key_1" \
+  -H "Authorization: Bearer authenticator YOUR_CLAUDE_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"messages": [{"role": "user", "content": "Hello"}]}'
 ```
+
+**注意事项**：
+- 中间层会自动在所有请求头中查找包含`authenticator`的值
+- 中间层认证key使用`cr_`前缀（仅在启用认证时需要）
+- Claude API key必须包含`authenticator`前缀，可以放在任何请求头中
+- 中间层会自动将`authenticator XXX`替换为选中的账户ID后转发
 
 ## 负载均衡策略
 
