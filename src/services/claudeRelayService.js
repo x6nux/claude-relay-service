@@ -218,6 +218,12 @@ class ClaudeRelayService {
             await accountRecoveryService.recordAccountFailure(accountId, new Error('HTTP 429 Rate limit'));
           }
           lastResponse = response;
+        // 确保响应包含 accountId 和 poolId
+        lastResponse.accountId = accountId;
+        lastResponse.poolId = poolId;
+          // 确保响应包含 accountId 和 poolId
+          lastResponse.accountId = accountId;
+          lastResponse.poolId = poolId;
           
           // 如果还有重试次数，继续下一次重试
           if (retryCount < maxRetries - 1) {
@@ -286,10 +292,16 @@ class ClaudeRelayService {
               await accountRecoveryService.recordAccountFailure(accountId, new Error('Organization disabled'));
             }
             lastResponse = response;
+        // 确保响应包含 accountId 和 poolId
+        lastResponse.accountId = accountId;
+        lastResponse.poolId = poolId;
+          // 确保响应包含 accountId 和 poolId
+          lastResponse.accountId = accountId;
+          lastResponse.poolId = poolId;
             
             // 如果还有重试次数，切换账号继续重试
             if (retryCount < maxRetries - 1) {
-              logger.info(`🔄 Account banned, switching to a different account...`);
+              logger.info('🔄 Account banned, switching to a different account...');
               continue;
             }
           } else if (isTokenRevoked) {
@@ -302,10 +314,16 @@ class ClaudeRelayService {
               await accountRecoveryService.recordAccountFailure(accountId, new Error('OAuth token revoked'));
             }
             lastResponse = response;
+        // 确保响应包含 accountId 和 poolId
+        lastResponse.accountId = accountId;
+        lastResponse.poolId = poolId;
+          // 确保响应包含 accountId 和 poolId
+          lastResponse.accountId = accountId;
+          lastResponse.poolId = poolId;
             
             // 如果还有重试次数，切换账号继续重试
             if (retryCount < maxRetries - 1) {
-              logger.info(`🔄 OAuth token revoked, switching to a different account...`);
+              logger.info('🔄 OAuth token revoked, switching to a different account...');
               continue;
             }
           } else if (isRateLimited) {
@@ -318,6 +336,12 @@ class ClaudeRelayService {
               await accountRecoveryService.recordAccountFailure(accountId, new Error('Rate limit exceeded'));
             }
             lastResponse = response;
+        // 确保响应包含 accountId 和 poolId
+        lastResponse.accountId = accountId;
+        lastResponse.poolId = poolId;
+          // 确保响应包含 accountId 和 poolId
+          lastResponse.accountId = accountId;
+          lastResponse.poolId = poolId;
             
             // 如果还有重试次数，继续下一次重试
             if (retryCount < maxRetries - 1) {
@@ -364,6 +388,9 @@ class ClaudeRelayService {
         
         // 其他错误，直接返回
         lastResponse = response;
+        // 确保响应包含 accountId 和 poolId
+        lastResponse.accountId = accountId;
+        lastResponse.poolId = poolId;
         break;
         
       } catch (error) {
@@ -724,7 +751,8 @@ class ClaudeRelayService {
             const response = {
               statusCode: res.statusCode,
               headers: res.headers,
-              body: bodyString
+              body: bodyString,
+              accountId: accountId // 添加 accountId 到响应对象
             };
             
             logger.debug(`🔗 Claude API response: ${res.statusCode}`);
@@ -1195,9 +1223,8 @@ class ClaudeRelayService {
         req.destroy();
         logger.error('❌ Claude stream request timeout');
         
-        // 记录失败到熔断器和恢复服务
-        circuitBreakerService.recordFailure(accountId, 'Request timeout').catch(() => {});
-        accountRecoveryService.recordAccountFailure(accountId, new Error('Request timeout')).catch(() => {});
+        // 注意：_makeClaudeStreamRequest 函数没有 accountId 参数，所以这里不能记录到熔断器和恢复服务
+        // 如果需要记录，应该在调用此函数的地方处理
         if (!responseStream.headersSent) {
           responseStream.writeHead(504, { 
             'Content-Type': 'text/event-stream',
@@ -1331,9 +1358,8 @@ class ClaudeRelayService {
         req.destroy();
         logger.error('❌ Claude stream request timeout');
         
-        // 记录失败到熔断器和恢复服务
-        circuitBreakerService.recordFailure(accountId, 'Request timeout').catch(() => {});
-        accountRecoveryService.recordAccountFailure(accountId, new Error('Request timeout')).catch(() => {});
+        // 注意：_makeClaudeStreamRequest 函数没有 accountId 参数，所以这里不能记录到熔断器和恢复服务
+        // 如果需要记录，应该在调用此函数的地方处理
         if (!responseStream.headersSent) {
           responseStream.writeHead(504, { 
             'Content-Type': 'text/event-stream',

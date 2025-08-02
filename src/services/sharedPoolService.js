@@ -179,7 +179,7 @@ class SharedPoolService {
         }
       }
 
-      logger.success(`🏊 Created default shared pool`);
+      logger.success('🏊 Created default shared pool');
       
       // 获取实际添加到默认池的账户ID
       const finalAccountIds = await client.smembers(`${this.POOL_ACCOUNTS_KEY_PREFIX}${this.DEFAULT_POOL_ID}`);
@@ -557,7 +557,7 @@ class SharedPoolService {
 
     if (activeAccountIds.length === 0) {
       // 如果所有账户都被限流，则从原始可用账户中选择（作为备用方案）
-      logger.warn(`⚠️ All accounts are rate limited in random selection, falling back to original list`);
+      logger.warn('⚠️ All accounts are rate limited in random selection, falling back to original list');
       if (availableIds.length === 0) return null;
       const randomIndex = Math.floor(Math.random() * availableIds.length);
       return availableIds[randomIndex];

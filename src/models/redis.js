@@ -1373,7 +1373,7 @@ class RedisClient {
       logger.debug(`🔗 Updated shared pools for API key ${apiKeyId}: ${poolIds.join(', ')}`);
       return true;
     } catch (error) {
-      logger.error(`❌ Failed to set API key shared pools:`, error);
+      logger.error('❌ Failed to set API key shared pools:', error);
       throw error;
     }
   }
@@ -1385,7 +1385,7 @@ class RedisClient {
       const poolIds = await this.client.smembers(key);
       return poolIds || [];
     } catch (error) {
-      logger.error(`❌ Failed to get API key shared pools:`, error);
+      logger.error('❌ Failed to get API key shared pools:', error);
       return [];
     }
   }
@@ -1398,7 +1398,7 @@ class RedisClient {
       logger.debug(`🔗 Added pool ${poolId} to API key ${apiKeyId}`);
       return true;
     } catch (error) {
-      logger.error(`❌ Failed to add shared pool to API key:`, error);
+      logger.error('❌ Failed to add shared pool to API key:', error);
       throw error;
     }
   }
@@ -1411,7 +1411,7 @@ class RedisClient {
       logger.debug(`🔗 Removed pool ${poolId} from API key ${apiKeyId}`);
       return true;
     } catch (error) {
-      logger.error(`❌ Failed to remove shared pool from API key:`, error);
+      logger.error('❌ Failed to remove shared pool from API key:', error);
       throw error;
     }
   }
