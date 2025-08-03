@@ -1,4 +1,4 @@
-FROM golang:1.24.4 AS builder
+FROM golang:1.24.4-alpine AS builder
 
 # 设置工作目录
 WORKDIR /app
