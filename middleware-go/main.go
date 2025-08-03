@@ -37,7 +37,7 @@ func main() {
 
 	// 初始化配置
 	cfg := config.Load()
-	
+
 	// 打印环境变量配置状态
 	log.Info("========================================")
 	log.Info("Claude Middleware Configuration Status")
@@ -45,7 +45,7 @@ func main() {
 	log.Infof("Server Port: %d", cfg.Server.Port)
 	log.Infof("Server Mode: %s", cfg.Server.Mode)
 	log.Debugf("Redis Host: %s", cfg.Redis.Host)
-	log.Debugf("Redis Port: %s", cfg.Redis.Port)
+	log.Debugf("Redis Port: %d", cfg.Redis.Port)
 	log.Debugf("Redis DB: %d", cfg.Redis.DB)
 	log.Debugf("Redis Password: %s", func() string {
 		if cfg.Redis.Password == "" {
@@ -72,7 +72,7 @@ func main() {
 
 	// 初始化认证配置
 	authConfig := auth.NewAuthConfig()
-	
+
 	// 打印认证配置状态
 	log.Debug("Authentication Configuration:")
 	log.Debugf("Auth Enabled: %v", authConfig.Enabled)
@@ -99,7 +99,6 @@ func main() {
 
 	// 创建路由
 	r := gin.New()
-	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
 
 	// 健康检查（不需要认证）
@@ -118,7 +117,7 @@ func main() {
 	} else {
 		log.Warn("API Key authentication disabled")
 	}
-	
+
 	// 添加账户日志中间件（可选，用于调试）
 	// api.Use(proxy.AccountLoggingMiddleware())
 	// api.Use(proxy.AccountMetricsMiddleware(redisClient))
