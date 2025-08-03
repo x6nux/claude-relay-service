@@ -55,8 +55,19 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 	requestPath := c.Request.URL.Path
 	log.Printf("Processing request: %s %s", c.Request.Method, requestPath)
 	
-	// 选择可用的Claude账户ID
-	accountID, err := s.selectAvailableAccount()
+	// 读取请求体
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Failed to read request body"})
+		return
+	}
+	
+	// 重新设置请求体，以便后续使用
+	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	
+	// 选择可用的Claude账户ID（传递请求体和路径用于模型检测）
+	accountID, err := s.selectAvailableAccount(bodyBytes, requestPath)
 	if err != nil {
 		log.Printf("Failed to select account for %s: %v", requestPath, err)
 		c.JSON(http.StatusServiceUnavailable, gin.H{
@@ -94,17 +105,6 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 	ctx := WithAccount(c.Request.Context(), *selectedAccount)
 	ctx = WithAccountID(ctx, accountID)
 	c.Request = c.Request.WithContext(ctx)
-	
-	// 读取请求体
-	bodyBytes, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Failed to read request body"})
-		return
-	}
-	
-	// 重新设置请求体，以便后续使用
-	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	
 	// 创建目标URL
 	targetURL := *s.targetURL
@@ -149,7 +149,7 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 		s.markAccountAsProblematic(accountID, "network_error")
 		
 		// 如果请求失败，可能是账户问题，尝试其他账户
-		if retryAccountID, retryErr := s.selectAvailableAccountExcluding(accountID); retryErr == nil {
+		if retryAccountID, retryErr := s.selectAvailableAccountExcluding(accountID, bodyBytes, requestPath); retryErr == nil {
 			log.Printf("Retrying %s with different account: %s", requestPath, retryAccountID)
 			
 			// 重新创建请求
@@ -198,7 +198,7 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 			s.markAccountAsProblematic(accountID, fmt.Sprintf("http_error_%d", resp.StatusCode))
 			
 			// 尝试使用其他账户重试
-			if retryAccountID, retryErr := s.selectAvailableAccountExcluding(accountID); retryErr == nil {
+			if retryAccountID, retryErr := s.selectAvailableAccountExcluding(accountID, bodyBytes, requestPath); retryErr == nil {
 				log.Printf("Retrying %s with different account due to status %d: %s", requestPath, resp.StatusCode, retryAccountID)
 				
 				// 重新创建请求
@@ -336,12 +336,13 @@ func (s *Service) isAccountProblematic(accountID string) bool {
 	
 	return true
 }
-func (s *Service) selectAvailableAccount() (string, error) {
-	return s.selectAvailableAccountExcluding("")
+// selectAvailableAccount 选择可用的账户
+func (s *Service) selectAvailableAccount(requestBody []byte, requestPath string) (string, error) {
+	return s.selectAvailableAccountExcluding("", requestBody, requestPath)
 }
 
 // selectAvailableAccountExcluding 选择可用的账户，排除指定账户
-func (s *Service) selectAvailableAccountExcluding(excludeAccountID string) (string, error) {
+func (s *Service) selectAvailableAccountExcluding(excludeAccountID string, requestBody []byte, requestPath string) (string, error) {
 	// 每次请求时从Redis获取账户
 	accounts, err := s.redisClient.GetAllActiveAccounts()
 	if err != nil {
@@ -352,12 +353,24 @@ func (s *Service) selectAvailableAccountExcluding(excludeAccountID string) (stri
 		return "", fmt.Errorf("no active accounts available")
 	}
 	
+	// 检测模型类型
+	detector := &ModelDetector{}
+	model := detector.ExtractModelFromRequest(requestBody, requestPath)
+	requiresMAX := detector.RequiresMAXAccount(model)
+	
+	log.Printf("🔍 Model detected: '%s', requires MAX account: %v", model, requiresMAX)
+	
 	log.Printf("🔍 Searching for alternative account (excluding %s), total accounts: %d", excludeAccountID, len(accounts))
 	
 	// 过滤掉被排除的账户、限流账户和有问题的账户
 	var availableAccounts []redis.ClaudeAccount
 	var rateLimitedAccounts []redis.ClaudeAccount
 	var problematicAccounts []redis.ClaudeAccount
+	
+	// 如果需要 MAX 账号，进一步分类
+	var maxAvailableAccounts []redis.ClaudeAccount
+	var maxRateLimitedAccounts []redis.ClaudeAccount
+	var maxProblematicAccounts []redis.ClaudeAccount
 	
 	for _, account := range accounts {
 		if account.ID == excludeAccountID {
@@ -368,55 +381,92 @@ func (s *Service) selectAvailableAccountExcluding(excludeAccountID string) (stri
 		isRateLimited := s.isAccountRateLimited(account.ID)
 		isProblematic := s.isAccountProblematic(account.ID)
 		
+		// 检查账号状态并分类
 		if isProblematic {
 			problematicAccounts = append(problematicAccounts, account)
-			log.Printf("   ❌ Account %s is problematic", account.ID)
+			if account.IsMAX {
+				maxProblematicAccounts = append(maxProblematicAccounts, account)
+			}
+			log.Printf("   ❌ Account %s is problematic (MAX: %v)", account.ID, account.IsMAX)
 		} else if isRateLimited {
 			rateLimitedAccounts = append(rateLimitedAccounts, account)
-			log.Printf("   ⏱️  Account %s is rate limited", account.ID)
+			if account.IsMAX {
+				maxRateLimitedAccounts = append(maxRateLimitedAccounts, account)
+			}
+			log.Printf("   ⏱️  Account %s is rate limited (MAX: %v)", account.ID, account.IsMAX)
 		} else {
 			availableAccounts = append(availableAccounts, account)
-			log.Printf("   ✅ Account %s is available", account.ID)
+			if account.IsMAX {
+				maxAvailableAccounts = append(maxAvailableAccounts, account)
+			}
+			log.Printf("   ✅ Account %s is available (MAX: %v)", account.ID, account.IsMAX)
 		}
 	}
 	
-	log.Printf("📊 Account status: %d available, %d rate-limited, %d problematic", 
-		len(availableAccounts), len(rateLimitedAccounts), len(problematicAccounts))
+	log.Printf("📊 Account status: %d available (%d MAX), %d rate-limited (%d MAX), %d problematic (%d MAX)", 
+		len(availableAccounts), len(maxAvailableAccounts),
+		len(rateLimitedAccounts), len(maxRateLimitedAccounts),
+		len(problematicAccounts), len(maxProblematicAccounts))
 	
-	// 优先使用完全可用的账户
-	if len(availableAccounts) > 0 {
-		// 按最后使用时间排序，选择最久未使用的
-		sort.Slice(availableAccounts, func(i, j int) bool {
-			timeI, _ := time.Parse(time.RFC3339, availableAccounts[i].LastUsedAt)
-			timeJ, _ := time.Parse(time.RFC3339, availableAccounts[j].LastUsedAt)
-			return timeI.Before(timeJ)
-		})
-		
-		log.Printf("✅ Selected available account: %s (%s)", availableAccounts[0].ID, availableAccounts[0].Name)
-		return availableAccounts[0].ID, nil
+	// 选择账号的优先级策略
+	var selectedAccounts []redis.ClaudeAccount
+	
+	if requiresMAX {
+		// 对于 claude-opus-4-20250514 模型，优先使用 MAX 账号
+		if len(maxAvailableAccounts) > 0 {
+			selectedAccounts = maxAvailableAccounts
+			log.Printf("🎯 Using MAX available accounts for Opus model")
+		} else if len(maxRateLimitedAccounts) > 0 {
+			selectedAccounts = maxRateLimitedAccounts
+			log.Printf("⚠️ Using MAX rate-limited accounts for Opus model (no available MAX accounts)")
+		} else if len(maxProblematicAccounts) > 0 {
+			selectedAccounts = maxProblematicAccounts
+			log.Printf("⚠️ Using MAX problematic accounts for Opus model (no other MAX accounts)")
+		} else {
+			// 如果没有 MAX 账号，记录警告但继续使用普通账号
+			log.Printf("⚠️ No MAX accounts found for Opus model, falling back to regular accounts")
+			if len(availableAccounts) > 0 {
+				selectedAccounts = availableAccounts
+			} else if len(rateLimitedAccounts) > 0 {
+				selectedAccounts = rateLimitedAccounts
+			} else {
+				selectedAccounts = problematicAccounts
+			}
+		}
+	} else {
+		// 对于其他模型，使用所有类型的账号（优先非 MAX 账号以节省资源）
+		if len(availableAccounts) > 0 {
+			selectedAccounts = availableAccounts
+			log.Printf("🎯 Using all available accounts for regular model")
+		} else if len(rateLimitedAccounts) > 0 {
+			selectedAccounts = rateLimitedAccounts
+			log.Printf("⚠️ Using rate-limited accounts (no available accounts)")
+		} else {
+			selectedAccounts = problematicAccounts
+			log.Printf("⚠️ Using problematic accounts (no other accounts)")
+		}
 	}
 	
-	// 其次使用限流账户（比有问题的账户好）
-	if len(rateLimitedAccounts) > 0 {
-		sort.Slice(rateLimitedAccounts, func(i, j int) bool {
-			timeI, _ := time.Parse(time.RFC3339, rateLimitedAccounts[i].RateLimitedAt)
-			timeJ, _ := time.Parse(time.RFC3339, rateLimitedAccounts[j].RateLimitedAt)
-			return timeI.Before(timeJ)
-		})
-		
-		log.Printf("All accounts unavailable, using rate limited account: %s (%s)", 
-			rateLimitedAccounts[0].ID, rateLimitedAccounts[0].Name)
-		return rateLimitedAccounts[0].ID, nil
+	// 检查是否有可选账号
+	if len(selectedAccounts) == 0 {
+		return "", fmt.Errorf("no accounts available")
 	}
 	
-	// 最后使用有问题的账户（总比没有好）
-	if len(problematicAccounts) > 0 {
-		log.Printf("All accounts have issues, using problematic account: %s (%s)", 
-			problematicAccounts[0].ID, problematicAccounts[0].Name)
-		return problematicAccounts[0].ID, nil
+	// 按最后使用时间排序，选择最久未使用的
+	sort.Slice(selectedAccounts, func(i, j int) bool {
+		timeI, _ := time.Parse(time.RFC3339, selectedAccounts[i].LastUsedAt)
+		timeJ, _ := time.Parse(time.RFC3339, selectedAccounts[j].LastUsedAt)
+		return timeI.Before(timeJ)
+	})
+	
+	selected := selectedAccounts[0]
+	accountType := "regular"
+	if selected.IsMAX {
+		accountType = "MAX"
 	}
 	
-	return "", fmt.Errorf("no accounts available")
+	log.Printf("✅ Selected %s account: %s (%s)", accountType, selected.ID, selected.Name)
+	return selected.ID, nil
 }
 
 // isAccountRateLimited 检查账户是否被限流（仅内存）

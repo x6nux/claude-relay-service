@@ -19,6 +19,7 @@ type ClaudeAccount struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
 	IsActive     bool   `json:"isActive"`
+	IsMAX        bool   `json:"isMAX"`        // MAX账号标识
 	Status       string `json:"status"`
 	LastUsedAt   string `json:"lastUsedAt"`
 	ExpiresAt    int64  `json:"expiresAt"`
@@ -113,6 +114,17 @@ func (c *Client) parseAccountData(data map[string]string) (ClaudeAccount, error)
 	
 	if isActive, ok := data["isActive"]; ok {
 		account.IsActive = isActive == "true"
+	}
+	
+	// 解析 IsMAX 字段，支持从 Redis 读取和基于名称自动判断
+	if isMAX, ok := data["isMAX"]; ok {
+		account.IsMAX = isMAX == "true"
+	} else {
+		// 如果 Redis 中没有 isMAX 字段，基于账号名称自动判断
+		// 账号名称以 "MAX" 开头的视为 MAX 账号
+		if account.Name != "" && len(account.Name) >= 3 {
+			account.IsMAX = account.Name[:3] == "MAX"
+		}
 	}
 	
 	if status, ok := data["status"]; ok {
