@@ -3,11 +3,11 @@ package redis
 import (
 	"context"
 	"fmt"
-	"log"
 	"strconv"
 
-	"github.com/redis/go-redis/v9"
 	"claude-middleware/internal/config"
+	"github.com/gophertool/tool/log"
+	"github.com/redis/go-redis/v9"
 )
 
 type Client struct {
@@ -60,8 +60,8 @@ func (c *Client) GetAllActiveAccounts() ([]ClaudeAccount, error) {
 		return nil, fmt.Errorf("failed to get account keys: %w", err)
 	}
 	
-	log.Printf("🔍 Searching for accounts with pattern: %s", pattern)
-	log.Printf("📋 Found %d keys in Redis", len(keys))
+	log.Debugf("🔍 Searching for accounts with pattern: %s", pattern)
+	log.Debugf("📋 Found %d keys in Redis", len(keys))
 	
 	var accounts []ClaudeAccount
 	var skippedCount int
@@ -69,7 +69,7 @@ func (c *Client) GetAllActiveAccounts() ([]ClaudeAccount, error) {
 	for _, key := range keys {
 		accountData, err := c.client.HGetAll(c.ctx, key).Result()
 		if err != nil {
-			log.Printf("⚠️  Error reading account %s: %v", key, err)
+			log.Debugf("⚠️  Error reading account %s: %v", key, err)
 			skippedCount++
 			continue // 跳过错误的账户
 		}
@@ -77,7 +77,7 @@ func (c *Client) GetAllActiveAccounts() ([]ClaudeAccount, error) {
 		// 解析账户数据
 		account, err := c.parseAccountData(accountData)
 		if err != nil {
-			log.Printf("⚠️  Error parsing account %s: %v", key, err)
+			log.Debugf("⚠️  Error parsing account %s: %v", key, err)
 			skippedCount++
 			continue // 跳过解析失败的账户
 		}
@@ -86,13 +86,13 @@ func (c *Client) GetAllActiveAccounts() ([]ClaudeAccount, error) {
 		if account.IsActive && account.Status != "error" && account.Status != "banned" && account.Status != "oauth_revoked" {
 			accounts = append(accounts, account)
 		} else {
-			log.Printf("⏭️  Skipping account %s: IsActive=%v, Status=%s", account.ID, account.IsActive, account.Status)
+			log.Debugf("⏭️  Skipping account %s: IsActive=%v, Status=%s", account.ID, account.IsActive, account.Status)
 			skippedCount++
 		}
 	}
 	
 	if skippedCount > 0 {
-		log.Printf("ℹ️  Skipped %d accounts (inactive or invalid status)", skippedCount)
+		log.Debugf("ℹ️  Skipped %d accounts (inactive or invalid status)", skippedCount)
 	}
 	
 	return accounts, nil
