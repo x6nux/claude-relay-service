@@ -21,7 +21,7 @@ func main() {
 	if level == "" {
 		level = "info"
 	}
-
+	
 	switch level {
 	case "debug":
 		log.SetLevel(log.DEBUG)
