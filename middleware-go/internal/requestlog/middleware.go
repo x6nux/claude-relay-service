@@ -197,9 +197,8 @@ func (rl *RequestLogger) logWriter() {
 				continue
 			}
 
-			// 按日期组织文件
-			date := time.Now().Format("2006-01-02")
-			filename := fmt.Sprintf("claude-requests-%s.json", date)
+			// 统一输出到claude-requests.json文件
+			filename := "claude-requests.json"
 			filepath := filepath.Join(rl.config.LogDir, filename)
 
 			// 添加到缓冲区
@@ -224,8 +223,7 @@ func (rl *RequestLogger) logWriter() {
 			for {
 				select {
 				case logData := <-rl.logChan:
-					date := time.Now().Format("2006-01-02")
-					filename := fmt.Sprintf("claude-requests-%s.json", date)
+					filename := "claude-requests.json"
 					filepath := filepath.Join(rl.config.LogDir, filename)
 					buffer[filepath] = append(buffer[filepath], logData)
 				default:
@@ -295,7 +293,7 @@ func (rl *RequestLogger) Cleanup() error {
 		}
 		
 		name := entry.Name()
-		if !strings.HasPrefix(name, "claude-requests-") || !strings.HasSuffix(name, ".json") {
+		if name != "claude-requests.json" {
 			continue
 		}
 

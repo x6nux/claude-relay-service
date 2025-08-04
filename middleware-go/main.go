@@ -12,6 +12,7 @@ import (
 
 	"claude-middleware/internal/auth"
 	"claude-middleware/internal/config"
+	"claude-middleware/internal/interceptor"
 	"claude-middleware/internal/proxy"
 	"claude-middleware/internal/redis"
 	"claude-middleware/internal/requestlog"
@@ -26,7 +27,7 @@ func main() {
 	if level == "" {
 		level = "info"
 	}
-	
+
 	switch level {
 	case "debug":
 		log.SetLevel(log.DEBUG)
@@ -89,7 +90,7 @@ func main() {
 		go func() {
 			ticker := time.NewTicker(24 * time.Hour) // 每天清理一次
 			defer ticker.Stop()
-			
+
 			for range ticker.C {
 				if err := requestLogger.Cleanup(); err != nil {
 					log.Errorf("Failed to cleanup old request logs: %v", err)
@@ -100,6 +101,9 @@ func main() {
 
 	// 初始化认证配置
 	authConfig := auth.NewAuthConfig()
+
+	// 初始化请求拦截器（必须启用）
+	requestInterceptor := interceptor.CreateRequestInterceptor()
 
 	// 打印认证配置状态
 	log.Debug("Authentication Configuration:")
@@ -145,6 +149,10 @@ func main() {
 	} else {
 		log.Warn("API Key authentication disabled")
 	}
+
+	// 添加请求拦截器中间件（必须启用，在认证之前）
+	log.Info("Request interceptor middleware enabled")
+	api.Use(requestInterceptor.Middleware())
 
 	// 添加请求日志中间件
 	if cfg.RequestLog.Enabled {
