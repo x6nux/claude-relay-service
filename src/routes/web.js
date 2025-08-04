@@ -93,7 +93,7 @@ router.post('/auth/login', async (req, res) => {
           };
           
           // 重新存储到Redis，不设置过期时间
-          await redis.getClient().hset('session:admin_credentials', adminData);
+          await redis.setSession('admin_credentials', adminData);
           
           logger.info('✅ Admin credentials reloaded from init.json');
         } catch (error) {
@@ -215,12 +215,43 @@ router.post('/auth/change-password', async (req, res) => {
     }
 
     // 获取当前管理员信息
-    const adminData = await redis.getSession('admin_credentials');
-    if (!adminData) {
-      return res.status(500).json({
-        error: 'Admin data not found',
-        message: 'Administrator credentials not found'
-      });
+    let adminData = await redis.getSession('admin_credentials');
+    
+    // 如果Redis中没有管理员凭据，尝试从init.json重新加载
+    if (!adminData || Object.keys(adminData).length === 0) {
+      const initFilePath = path.join(__dirname, '../../data/init.json');
+      
+      if (fs.existsSync(initFilePath)) {
+        try {
+          const initData = JSON.parse(fs.readFileSync(initFilePath, 'utf8'));
+          const saltRounds = 10;
+          const passwordHash = await bcrypt.hash(initData.adminPassword, saltRounds);
+          
+          adminData = {
+            username: initData.adminUsername,
+            passwordHash: passwordHash,
+            createdAt: initData.initializedAt || new Date().toISOString(),
+            lastLogin: null,
+            updatedAt: initData.updatedAt || null
+          };
+          
+          // 重新存储到Redis，不设置过期时间
+          await redis.setSession('admin_credentials', adminData);
+          
+          logger.info('✅ Admin credentials reloaded from init.json for password change');
+        } catch (error) {
+          logger.error('❌ Failed to reload admin credentials:', error);
+          return res.status(500).json({
+            error: 'Configuration error',
+            message: 'Failed to load admin credentials'
+          });
+        }
+      } else {
+        return res.status(500).json({
+          error: 'Configuration file not found',
+          message: 'init.json file is missing'
+        });
+      }
     }
 
     // 验证当前密码
