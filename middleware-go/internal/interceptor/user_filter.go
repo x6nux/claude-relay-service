@@ -7,6 +7,21 @@ import (
 	"github.com/gophertool/tool/log"
 )
 
+// 模型配置常量
+const (
+	// Haiku 模型相关配置
+	HaikuModel          = "claude-3-5-haiku-20241022"
+	HaikuMaxTokens      = 1024
+	HaikuBashContent    = "Your task is to process Bash commands that an AI coding agent wants to run."
+	HaikuExtractContent = "Extract any file paths that this command reads or modifies. For commands like"
+
+	// Sonnet/Opus 模型相关配置
+	SonnetModel         = "claude-sonnet-4-20250514"
+	OpusModel           = "claude-opus-4-20250514"
+	ClaudeCodeContent   = "You are Claude Code, Anthropic's official CLI for Claude"
+	JsonSchemaContent   = "http://json-schema.org/draft-07/schema#"
+)
+
 // Content 消息内容结构 - 使用更灵活的解析方式
 type Content struct {
 	Text string `json:"text,omitempty"`
@@ -70,19 +85,19 @@ func UserFilter(ctx *InterceptorContext) bool {
 	}
 	//基于模型检查
 	switch body.Model {
-	case "claude-3-5-haiku-20241022":
+	case HaikuModel:
 		//max-token
-		if body.MaxTokens > 1024 {
+		if body.MaxTokens > HaikuMaxTokens {
 			return false
 		}
 		//内容匹配
-		if !strings.Contains(bodyStr, "Your task is to process Bash commands that an AI coding agent wants to run.") && !strings.Contains(bodyStr, "Extract any file paths that this command reads or modifies. For commands like") {
+		if !strings.Contains(bodyStr, HaikuBashContent) && !strings.Contains(bodyStr, HaikuExtractContent) {
 			return false
 		}
 		return true
 		//内容匹配
-	case "claude-sonnet-4-20250514", "claude-opus-4-20250514":
-		if !strings.Contains(bodyStr, "You are Claude Code, Anthropic's official CLI for Claude") && !strings.Contains(bodyStr, "http://json-schema.org/draft-07/schema#") {
+	case SonnetModel, OpusModel:
+		if !strings.Contains(bodyStr, ClaudeCodeContent) && !strings.Contains(bodyStr, JsonSchemaContent) {
 			return false
 		}
 	}

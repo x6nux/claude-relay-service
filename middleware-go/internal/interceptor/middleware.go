@@ -153,8 +153,8 @@ func (ri *RequestInterceptor) Middleware() gin.HandlerFunc {
 				requestData.Method, requestData.Path, requestData.ClientIP)
 
 			c.JSON(http.StatusForbidden, gin.H{
-				"error":     "Request blocked",
-				"message":   "This request has been blocked by the interceptor",
+				"error":     "请求被拦截",
+				"message":   "该请求已被拦截器阻止，如有疑问请联系系统管理员",
 				"timestamp": time.Now().Format(time.RFC3339),
 			})
 			c.Abort()
