@@ -1,15 +1,20 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"claude-middleware/internal/auth"
 	"claude-middleware/internal/config"
 	"claude-middleware/internal/proxy"
 	"claude-middleware/internal/redis"
+	"claude-middleware/internal/requestlog"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gophertool/tool/log"
@@ -55,6 +60,12 @@ func main() {
 	}())
 	log.Infof("Target URL: %s", cfg.Proxy.TargetURL)
 	log.Infof("Proxy Timeout: %d seconds", cfg.Proxy.Timeout)
+	log.Infof("Request Logging: %v", cfg.RequestLog.Enabled)
+	if cfg.RequestLog.Enabled {
+		log.Infof("Log Directory: %s", cfg.RequestLog.LogDir)
+		log.Infof("Max Records per File: %d", cfg.RequestLog.MaxRecordsPerFile)
+		log.Infof("Retention Days: %d", cfg.RequestLog.RetentionDays)
+	}
 	log.Info("========================================")
 
 	// 初始化Redis连接
@@ -69,6 +80,23 @@ func main() {
 
 	// 初始化代理服务
 	proxyService := proxy.NewService(redisClient, cfg)
+
+	// 初始化请求日志记录器
+	requestLogger := requestlog.NewRequestLogger(&cfg.RequestLog)
+
+	// 启动定期清理任务
+	if cfg.RequestLog.Enabled {
+		go func() {
+			ticker := time.NewTicker(24 * time.Hour) // 每天清理一次
+			defer ticker.Stop()
+			
+			for range ticker.C {
+				if err := requestLogger.Cleanup(); err != nil {
+					log.Errorf("Failed to cleanup old request logs: %v", err)
+				}
+			}
+		}()
+	}
 
 	// 初始化认证配置
 	authConfig := auth.NewAuthConfig()
@@ -118,6 +146,12 @@ func main() {
 		log.Warn("API Key authentication disabled")
 	}
 
+	// 添加请求日志中间件
+	if cfg.RequestLog.Enabled {
+		log.Info("Request logging middleware enabled")
+		api.Use(requestLogger.Middleware())
+	}
+
 	// 添加账户日志中间件（可选，用于调试）
 	// api.Use(proxy.AccountLoggingMiddleware())
 	// api.Use(proxy.AccountMetricsMiddleware(redisClient))
@@ -143,8 +177,40 @@ func main() {
 	}())
 	log.Info("========================================")
 
-	if err := r.Run(":" + port); err != nil {
-		log.Errorf("Failed to start server: %v", err)
-		os.Exit(1)
+	// 创建HTTP服务器
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: r,
+	}
+
+	// 在后台启动服务器
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Errorf("Failed to start server: %v", err)
+			os.Exit(1)
+		}
+	}()
+
+	// 等待中断信号以优雅地关闭服务器
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Info("🛑 Shutting down server...")
+
+	// 停止请求日志记录器
+	if cfg.RequestLog.Enabled {
+		log.Info("Stopping request logger...")
+		requestLogger.Stop()
+	}
+
+	// 关闭服务器，等待现有连接完成
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Errorf("Server forced to shutdown: %v", err)
+	} else {
+		log.Info("✅ Server shutdown completed")
 	}
 }

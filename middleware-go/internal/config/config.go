@@ -3,12 +3,14 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
-	Server ServerConfig
-	Redis  RedisConfig
-	Proxy  ProxyConfig
+	Server      ServerConfig
+	Redis       RedisConfig
+	Proxy       ProxyConfig
+	RequestLog  RequestLogConfig
 }
 
 type ServerConfig struct {
@@ -28,6 +30,13 @@ type ProxyConfig struct {
 	Timeout   int // seconds
 }
 
+type RequestLogConfig struct {
+	Enabled           bool
+	LogDir            string
+	MaxRecordsPerFile int
+	RetentionDays     int
+}
+
 func Load() *Config {
 	return &Config{
 		Server: ServerConfig{
@@ -44,6 +53,12 @@ func Load() *Config {
 			TargetURL: getEnv("TARGET_URL", "http://localhost:3001"),
 			Timeout:   getEnvInt("PROXY_TIMEOUT", 300),
 		},
+		RequestLog: RequestLogConfig{
+			Enabled:           getEnvBool("REQUEST_LOGGING_ENABLED", false),
+			LogDir:            getEnv("REQUEST_LOG_DIR", "data/request-logs"),
+			MaxRecordsPerFile: getEnvInt("REQUEST_LOG_MAX_RECORDS", 1000),
+			RetentionDays:     getEnvInt("REQUEST_LOG_RETENTION_DAYS", 30),
+		},
 	}
 }
 
@@ -58,6 +73,18 @@ func getEnvInt(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
 		if intValue, err := strconv.Atoi(value); err == nil {
 			return intValue
+		}
+	}
+	return defaultValue
+}
+
+func getEnvBool(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		switch strings.ToLower(value) {
+		case "true", "1", "yes", "on":
+			return true
+		case "false", "0", "no", "off":
+			return false
 		}
 	}
 	return defaultValue

@@ -30,7 +30,6 @@ const {
   globalRateLimit,
   requestSizeLimit
 } = require('./middleware/auth');
-const { createRequestLoggerMiddleware, cleanupOldLogs } = require('./middleware/requestLogger');
 
 class Application {
   constructor() {
@@ -143,12 +142,6 @@ class Application {
       
       // 📝 请求日志（使用自定义logger而不是morgan）
       this.app.use(requestLogger);
-      
-      // 📝 Claude 请求日志记录（可选）
-      if (config.requestLogging?.enabled) {
-        this.app.use(createRequestLoggerMiddleware());
-        logger.info('📝 Claude request logging enabled');
-      }
       
       // 🔧 基础中间件
       this.app.use(express.json({ 
@@ -408,11 +401,6 @@ class Application {
         ]);
         
         await redis.cleanup();
-        
-        // 清理请求日志文件
-        if (config.requestLogging?.enabled) {
-          cleanupOldLogs();
-        }
         
         logger.success(`🧹 Cleanup completed: ${expiredKeys} expired keys, ${errorAccounts} error accounts reset`);
       } catch (error) {
