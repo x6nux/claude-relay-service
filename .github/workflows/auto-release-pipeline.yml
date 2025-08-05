@@ -194,7 +194,7 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         context: .
-        platforms: linux/amd64,linux/arm64
+        platforms: linux/amd64
         push: true
         tags: |
           ${{ secrets.DOCKERHUB_USERNAME }}/claude-relay-service:${{ steps.next_version.outputs.new_tag }}
@@ -223,7 +223,7 @@ jobs:
       with:
         context: ./middleware-go
         file: ./middleware-go/Dockerfile
-        platforms: linux/amd64,linux/arm64
+        platforms: linux/amd64
         push: true
         tags: |
           ${{ secrets.DOCKERHUB_USERNAME }}/claude-relay-service:middleware-${{ steps.next_version.outputs.new_tag }}
