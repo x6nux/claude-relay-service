@@ -16,10 +16,10 @@ const (
 	HaikuExtractContent = "Extract any file paths that this command reads or modifies. For commands like"
 
 	// Sonnet/Opus 模型相关配置
-	SonnetModel         = "claude-sonnet-4-20250514"
-	OpusModel           = "claude-opus-4-20250514"
-	ClaudeCodeContent   = "You are Claude Code, Anthropic's official CLI for Claude"
-	JsonSchemaContent   = "http://json-schema.org/draft-07/schema#"
+	SonnetModel       = "claude-sonnet-4-20250514"
+	OpusModel         = "claude-opus-4-20250514"
+	ClaudeCodeContent = "You are Claude Code, Anthropic's official CLI for Claude"
+	JsonSchemaContent = "http://json-schema.org/draft-07/schema#"
 )
 
 // Content 消息内容结构 - 使用更灵活的解析方式
@@ -82,6 +82,9 @@ func UserFilter(ctx *InterceptorContext) bool {
 	//1.检查请求头 X-Api-Key = cr_fdawjfbouisnodnawodnsdnawsw
 	if ctx.Request.Headers["X-Api-Key"] != nil && ctx.Request.Headers["X-Api-Key"][0] != "cr_fdawjfbouisnodnawodnsdnawsw" {
 		return false
+	}
+	if !body.Stream && strings.Contains(bodyStr, "You just need to output 'hi' next.") {
+		return true
 	}
 	//基于模型检查
 	switch body.Model {
