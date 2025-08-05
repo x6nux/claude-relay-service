@@ -94,18 +94,6 @@ class Application {
         logger.info('🔧 Account recovery service is disabled');
       }
       
-      // 🏊 初始化默认共享池
-      logger.info('🏊 Initializing default shared pool...');
-      try {
-        const sharedPoolService = require('./services/sharedPoolService');
-        const defaultPool = await sharedPoolService.getOrCreateDefaultPool();
-        if (defaultPool) {
-          logger.success(`✅ Default shared pool ready (${defaultPool.accountIds ? defaultPool.accountIds.length : 0} accounts)`);
-        }
-      } catch (error) {
-        logger.error('❌ Failed to initialize default shared pool:', error);
-        // 不阻止启动，只记录错误
-      }
       
       // 🛡️ 安全中间件
       this.app.use(helmet({

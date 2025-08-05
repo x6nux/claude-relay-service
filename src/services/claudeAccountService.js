@@ -533,27 +533,28 @@ class ClaudeAccountService {
         }
       }
 
-      // 从共享池中选择账户（包括默认池）
-      const sharedPoolService = require('./sharedPoolService');
-      const poolResult = await sharedPoolService.selectAccountFromPools(
-        apiKeyData.id,
-        sessionHash,
-        excludeAccountIds
-      );
+      // 从共享账户中选择
+      logger.info(`🎯 Selecting from shared accounts for API key ${apiKeyData.name}`);
       
-      if (poolResult && poolResult.accountId) {
-        logger.info(`🎯 Selected account ${poolResult.accountId} from pool "${poolResult.poolName}" for API key ${apiKeyData.name}`);
-        
-        // 如果有会话哈希，建立映射
-        if (sessionHash) {
-          await redis.setSessionAccountMapping(sessionHash, poolResult.accountId, 3600); // 1小时过期
+      // 检查会话映射
+      if (sessionHash) {
+        const mappedAccountId = await redis.getSessionAccountMapping(sessionHash);
+        if (mappedAccountId && (!excludeAccountIds || !excludeAccountIds.has(mappedAccountId))) {
+          const mappedAccount = await redis.getClaudeAccount(mappedAccountId);
+          if (mappedAccount && mappedAccount.isActive === 'true' && mappedAccount.status !== 'error' && mappedAccount.status !== 'banned') {
+            const isRateLimited = await this.isAccountRateLimited(mappedAccountId);
+            if (!isRateLimited) {
+              logger.info(`🎯 Using mapped account ${mappedAccountId} for session`);
+              return {
+                accountId: mappedAccountId,
+                poolId: null
+              };
+            } else {
+              logger.warn(`⚠️ Mapped account ${mappedAccountId} is rate limited, selecting new account`);
+              await redis.deleteSessionAccountMapping(sessionHash);
+            }
+          }
         }
-        
-        // 返回账户ID和池ID
-        return {
-          accountId: poolResult.accountId,
-          poolId: poolResult.poolId
-        };
       }
 
       // 如果仍然没有找到账户，作为最后的备用方案

@@ -25,7 +25,6 @@ const app = createApp({
                 { key: 'dashboard', name: '仪表板', icon: 'fas fa-tachometer-alt' },
                 { key: 'apiKeys', name: 'API Keys', icon: 'fas fa-key' },
                 { key: 'accounts', name: '账户管理', icon: 'fas fa-user-circle' },
-                { key: 'sharedPools', name: '共享池', icon: 'fas fa-swimming-pool' },
                 { key: 'tutorial', name: '使用教程', icon: 'fas fa-graduation-cap' },
                 { key: 'settings', name: '其他设置', icon: 'fas fa-cogs' }
             ],
@@ -137,9 +136,7 @@ const app = createApp({
                 expireDuration: '', // 过期时长选择
                 customExpireDate: '', // 自定义过期日期
                 expiresAt: null, // 实际的过期时间戳
-                dailyCostLimit: '', // 每日费用限制
-                useAllPools: true, // 是否使用所有共享池
-                selectedPoolIds: [] // 选择的共享池ID
+                dailyCostLimit: '' // 每日费用限制
             },
             apiKeyModelStats: {}, // 存储每个key的模型统计数据
             expandedApiKeys: {}, // 跟踪展开的API Keys
@@ -199,9 +196,7 @@ const app = createApp({
                 modelInput: '',
                 enableClientRestriction: false,
                 allowedClients: [],
-                dailyCostLimit: '',
-                useAllPools: true, // 是否使用所有共享池
-                selectedPoolIds: [] // 选择的共享池ID
+                dailyCostLimit: ''
             },
             
             // 支持的客户端列表
@@ -325,80 +320,6 @@ const app = createApp({
             oemSettingsLoading: false,
             oemSettingsSaving: false,
             
-            // 共享池相关
-            sharedPools: [],
-            sharedPoolsLoading: false,
-            showCreatePoolModal: false,
-            createPoolLoading: false,
-            poolForm: {
-                name: '',
-                description: '',
-                priority: 100,
-                accountSelectionStrategy: 'least_used',
-                isActive: true
-            },
-            showEditPoolModal: false,
-            editPoolLoading: false,
-            editPoolForm: {
-                id: '',
-                name: '',
-                description: '',
-                priority: 100,
-                accountSelectionStrategy: 'least_used',
-                isActive: true
-            },
-            // 池账户管理
-            showPoolAccountsModal: false,
-            poolAccountsLoading: false,
-            currentPoolAccounts: {
-                poolId: '',
-                poolName: '',
-                accounts: [],
-                availableAccounts: []
-            },
-            // API Key池管理
-            showApiKeyPoolsModal: false,
-            apiKeyPoolsLoading: false,
-            
-            // 新增：共享池管理模态框相关
-            showManagePoolAccountsModal: false,
-            currentManagePool: null,
-            managePoolTab: 'current',
-            poolAccounts: [],
-            availablePoolAccounts: [],
-            addAccountToPoolLoading: {},
-            removeAccountFromPoolLoading: {},
-            updatePoolLoading: false,
-            currentApiKeyPools: {
-                apiKeyId: '',
-                apiKeyName: '',
-                pools: [],
-                availablePools: []
-            },
-            
-            // 账户共享池管理
-            showAccountPoolsModal: false,
-            currentAccountForPools: null,
-            accountCurrentPools: [],
-            accountAvailablePools: [],
-            
-            // API Key共享池管理
-            showApiKeyPoolsModal: false,
-            currentApiKeyForPools: null,
-            apiKeyCurrentPools: [],
-            apiKeyAvailablePools: [],
-            removeApiKeyFromPoolLoading: {},
-            addApiKeyToPoolLoading: {},
-            
-            // 共享池统计相关
-            showPoolUsageModal: false,
-            poolUsageData: null,
-            poolUsageLoading: false,
-            currentPoolUsage: null,
-            poolAccountsUsage: [],
-            poolAccountsUsageLoading: false,
-            poolUsageTab: 'total', // total, daily, monthly
-            poolUsageCustomDate: null // 自定义日期
         }
     },
     
@@ -4383,7 +4304,6 @@ const app = createApp({
             }
         },
 
-        // ==================== 共享池管理方法 ====================
         
         // 加载共享池列表
         async loadSharedPools() {

@@ -27,8 +27,7 @@ class ApiKeyService {
       restrictedModels = [],
       enableClientRestriction = false,
       allowedClients = [],
-      dailyCostLimit = 0,
-      sharedPoolIds = []
+      dailyCostLimit = 0
     } = options;
 
     // 生成简单的API Key (64字符十六进制)
@@ -63,10 +62,6 @@ class ApiKeyService {
     // 保存API Key数据并建立哈希映射
     await redis.setApiKey(keyId, keyData, hashedKey);
     
-    // 保存共享池关联
-    if (sharedPoolIds && sharedPoolIds.length > 0) {
-      await redis.setApiKeySharedPools(keyId, sharedPoolIds);
-    }
     
     logger.success(`🔑 Generated new API key: ${name} (${keyId})`);
     
@@ -90,8 +85,7 @@ class ApiKeyService {
       dailyCostLimit: parseFloat(keyData.dailyCostLimit || 0),
       createdAt: keyData.createdAt,
       expiresAt: keyData.expiresAt,
-      createdBy: keyData.createdBy,
-      sharedPoolIds: sharedPoolIds || []
+      createdBy: keyData.createdBy
     };
   }
 
@@ -183,7 +177,6 @@ class ApiKeyService {
   async getAllApiKeys() {
     try {
       const apiKeys = await redis.getAllApiKeys();
-      const sharedPoolService = require('./sharedPoolService');
       
       // 为每个key添加使用统计和当前并发数
       for (const key of apiKeys) {
@@ -210,14 +203,6 @@ class ApiKeyService {
           key.allowedClients = [];
         }
         
-        // 获取关联的共享池
-        key.sharedPoolIds = await redis.getApiKeySharedPools(key.id);
-        try {
-          key.sharedPools = await sharedPoolService.getApiKeyPools(key.id);
-        } catch (e) {
-          key.sharedPools = [];
-        }
-        
         delete key.apiKey; // 不返回哈希后的key
       }
 
@@ -240,11 +225,6 @@ class ApiKeyService {
       const allowedUpdates = ['name', 'description', 'tokenLimit', 'concurrencyLimit', 'rateLimitWindow', 'rateLimitRequests', 'isActive', 'claudeAccountId', 'geminiAccountId', 'permissions', 'expiresAt', 'enableModelRestriction', 'restrictedModels', 'enableClientRestriction', 'allowedClients', 'dailyCostLimit'];
       const updatedData = { ...keyData };
       
-      // 处理共享池更新
-      if (updates.sharedPoolIds !== undefined) {
-        await redis.setApiKeySharedPools(keyId, updates.sharedPoolIds || []);
-      }
-
       for (const [field, value] of Object.entries(updates)) {
         if (allowedUpdates.includes(field)) {
           if (field === 'restrictedModels' || field === 'allowedClients') {
@@ -281,9 +261,6 @@ class ApiKeyService {
       if (result === 0) {
         throw new Error('API key not found');
       }
-      
-      // 清理共享池关联
-      await redis.setApiKeySharedPools(keyId, []);
       
       logger.success(`🗑️ Deleted API key: ${keyId}`);
       
@@ -427,59 +404,6 @@ class ApiKeyService {
     }
   }
 
-  // 🏊 将API Key加入共享池
-  async addApiKeyToPool(keyId, poolId) {
-    try {
-      const keyData = await redis.getApiKey(keyId);
-      if (!keyData || Object.keys(keyData).length === 0) {
-        throw new Error('API key not found');
-      }
-
-      const sharedPoolService = require('./sharedPoolService');
-      await sharedPoolService.addApiKeyToPool(keyId, poolId);
-      
-      logger.success(`🏊 Added API key ${keyId} to pool ${poolId}`);
-      return { success: true };
-    } catch (error) {
-      logger.error('❌ Failed to add API key to pool:', error);
-      throw error;
-    }
-  }
-
-  // 🔓 将API Key从共享池移除
-  async removeApiKeyFromPool(keyId, poolId) {
-    try {
-      const keyData = await redis.getApiKey(keyId);
-      if (!keyData || Object.keys(keyData).length === 0) {
-        throw new Error('API key not found');
-      }
-
-      const sharedPoolService = require('./sharedPoolService');
-      await sharedPoolService.removeApiKeyFromPool(keyId, poolId);
-      
-      logger.success(`🔓 Removed API key ${keyId} from pool ${poolId}`);
-      return { success: true };
-    } catch (error) {
-      logger.error('❌ Failed to remove API key from pool:', error);
-      throw error;
-    }
-  }
-
-  // 📋 获取API Key关联的所有共享池
-  async getApiKeyPools(keyId) {
-    try {
-      const keyData = await redis.getApiKey(keyId);
-      if (!keyData || Object.keys(keyData).length === 0) {
-        throw new Error('API key not found');
-      }
-
-      const sharedPoolService = require('./sharedPoolService');
-      return await sharedPoolService.getApiKeyPools(keyId);
-    } catch (error) {
-      logger.error('❌ Failed to get pools for API key:', error);
-      throw error;
-    }
-  }
 }
 
 // 导出实例和单独的方法

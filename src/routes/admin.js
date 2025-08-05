@@ -325,8 +325,7 @@ router.post('/api-keys', authenticateAdmin, async (req, res) => {
       restrictedModels,
       enableClientRestriction,
       allowedClients,
-      dailyCostLimit,
-      sharedPoolIds
+      dailyCostLimit
     } = req.body;
 
     // 输入验证
@@ -392,8 +391,7 @@ router.post('/api-keys', authenticateAdmin, async (req, res) => {
       restrictedModels,
       enableClientRestriction,
       allowedClients,
-      dailyCostLimit,
-      sharedPoolIds
+      dailyCostLimit
     });
 
     logger.success(`🔑 Admin created new API key: ${name}`);
@@ -408,7 +406,7 @@ router.post('/api-keys', authenticateAdmin, async (req, res) => {
 router.put('/api-keys/:keyId', authenticateAdmin, async (req, res) => {
   try {
     const { keyId } = req.params;
-    const { tokenLimit, concurrencyLimit, rateLimitWindow, rateLimitRequests, claudeAccountId, geminiAccountId, permissions, enableModelRestriction, restrictedModels, enableClientRestriction, allowedClients, expiresAt, dailyCostLimit, sharedPoolIds } = req.body;
+    const { tokenLimit, concurrencyLimit, rateLimitWindow, rateLimitRequests, claudeAccountId, geminiAccountId, permissions, enableModelRestriction, restrictedModels, enableClientRestriction, allowedClients, expiresAt, dailyCostLimit } = req.body;
 
     // 只允许更新指定字段
     const updates = {};
@@ -511,14 +509,6 @@ router.put('/api-keys/:keyId', authenticateAdmin, async (req, res) => {
         return res.status(400).json({ error: 'Daily cost limit must be a non-negative number' });
       }
       updates.dailyCostLimit = costLimit;
-    }
-
-    // 处理共享池关联
-    if (sharedPoolIds !== undefined) {
-      if (!Array.isArray(sharedPoolIds)) {
-        return res.status(400).json({ error: 'Shared pool IDs must be an array' });
-      }
-      updates.sharedPoolIds = sharedPoolIds;
     }
 
     await apiKeyService.updateApiKey(keyId, updates);
@@ -2409,249 +2399,6 @@ router.put('/oem-settings', authenticateAdmin, async (req, res) => {
   } catch (error) {
     logger.error('❌ Failed to update OEM settings:', error);
     res.status(500).json({ error: 'Failed to update OEM settings', message: error.message });
-  }
-});
-
-// 🏊 共享池管理
-
-// 获取所有共享池
-router.get('/shared-pools', authenticateAdmin, async (req, res) => {
-  try {
-    const sharedPoolService = require('../services/sharedPoolService');
-    const pools = await sharedPoolService.getAllPools();
-    
-    res.json({ success: true, data: pools });
-  } catch (error) {
-    logger.error('❌ Failed to get shared pools:', error);
-    res.status(500).json({ error: 'Failed to get shared pools', message: error.message });
-  }
-});
-
-// 创建新的共享池
-router.post('/shared-pools', authenticateAdmin, async (req, res) => {
-  try {
-    const { name, description, priority, maxConcurrency, accountSelectionStrategy } = req.body;
-    
-    if (!name) {
-      return res.status(400).json({ error: 'Pool name is required' });
-    }
-    
-    const sharedPoolService = require('../services/sharedPoolService');
-    const newPool = await sharedPoolService.createPool({
-      name,
-      description,
-      priority,
-      maxConcurrency,
-      accountSelectionStrategy
-    });
-    
-    logger.success(`🏊 Admin created new shared pool: ${name}`);
-    res.json({ success: true, data: newPool });
-  } catch (error) {
-    logger.error('❌ Failed to create shared pool:', error);
-    res.status(500).json({ error: 'Failed to create shared pool', message: error.message });
-  }
-});
-
-// 更新共享池
-router.put('/shared-pools/:poolId', authenticateAdmin, async (req, res) => {
-  try {
-    const { poolId } = req.params;
-    const updates = req.body;
-    
-    const sharedPoolService = require('../services/sharedPoolService');
-    await sharedPoolService.updatePool(poolId, updates);
-    
-    logger.success(`📝 Admin updated shared pool: ${poolId}`);
-    res.json({ success: true, message: 'Shared pool updated successfully' });
-  } catch (error) {
-    logger.error('❌ Failed to update shared pool:', error);
-    res.status(500).json({ error: 'Failed to update shared pool', message: error.message });
-  }
-});
-
-// 删除共享池
-router.delete('/shared-pools/:poolId', authenticateAdmin, async (req, res) => {
-  try {
-    const { poolId } = req.params;
-    
-    const sharedPoolService = require('../services/sharedPoolService');
-    await sharedPoolService.deletePool(poolId);
-    
-    logger.success(`🗑️ Admin deleted shared pool: ${poolId}`);
-    res.json({ success: true, message: 'Shared pool deleted successfully' });
-  } catch (error) {
-    logger.error('❌ Failed to delete shared pool:', error);
-    res.status(500).json({ error: 'Failed to delete shared pool', message: error.message });
-  }
-});
-
-// 添加账户到共享池
-router.post('/shared-pools/:poolId/accounts', authenticateAdmin, async (req, res) => {
-  try {
-    const { poolId } = req.params;
-    const { accountId } = req.body;
-    
-    if (!accountId) {
-      return res.status(400).json({ error: 'Account ID is required' });
-    }
-    
-    const sharedPoolService = require('../services/sharedPoolService');
-    await sharedPoolService.addAccountToPool(poolId, accountId);
-    
-    logger.success(`➕ Admin added account ${accountId} to pool ${poolId}`);
-    res.json({ success: true, message: 'Account added to pool successfully' });
-  } catch (error) {
-    logger.error('❌ Failed to add account to pool:', error);
-    res.status(500).json({ error: 'Failed to add account to pool', message: error.message });
-  }
-});
-
-// 从共享池移除账户
-router.delete('/shared-pools/:poolId/accounts/:accountId', authenticateAdmin, async (req, res) => {
-  try {
-    const { poolId, accountId } = req.params;
-    
-    const sharedPoolService = require('../services/sharedPoolService');
-    await sharedPoolService.removeAccountFromPool(poolId, accountId);
-    
-    logger.success(`➖ Admin removed account ${accountId} from pool ${poolId}`);
-    res.json({ success: true, message: 'Account removed from pool successfully' });
-  } catch (error) {
-    logger.error('❌ Failed to remove account from pool:', error);
-    res.status(500).json({ error: 'Failed to remove account from pool', message: error.message });
-  }
-});
-
-// 获取共享池中的账户
-router.get('/shared-pools/:poolId/accounts', authenticateAdmin, async (req, res) => {
-  try {
-    const { poolId } = req.params;
-    
-    const sharedPoolService = require('../services/sharedPoolService');
-    const accountIds = await sharedPoolService.getPoolAccounts(poolId);
-    
-    // 直接返回账户ID数组，前端期望的格式
-    res.json(accountIds);
-  } catch (error) {
-    logger.error('❌ Failed to get pool accounts:', error);
-    res.status(500).json({ error: 'Failed to get pool accounts', message: error.message });
-  }
-});
-
-// 将API Key添加到共享池
-router.post('/api-keys/:keyId/pools', authenticateAdmin, async (req, res) => {
-  try {
-    const { keyId } = req.params;
-    const { poolId } = req.body;
-    
-    if (!poolId) {
-      return res.status(400).json({ error: 'Pool ID is required' });
-    }
-    
-    await apiKeyService.addApiKeyToPool(keyId, poolId);
-    
-    logger.success(`🔗 Admin added API key ${keyId} to pool ${poolId}`);
-    res.json({ success: true, message: 'API key added to pool successfully' });
-  } catch (error) {
-    logger.error('❌ Failed to add API key to pool:', error);
-    res.status(500).json({ error: 'Failed to add API key to pool', message: error.message });
-  }
-});
-
-// 将API Key从共享池移除
-router.delete('/api-keys/:keyId/pools/:poolId', authenticateAdmin, async (req, res) => {
-  try {
-    const { keyId, poolId } = req.params;
-    
-    await apiKeyService.removeApiKeyFromPool(keyId, poolId);
-    
-    logger.success(`🔓 Admin removed API key ${keyId} from pool ${poolId}`);
-    res.json({ success: true, message: 'API key removed from pool successfully' });
-  } catch (error) {
-    logger.error('❌ Failed to remove API key from pool:', error);
-    res.status(500).json({ error: 'Failed to remove API key from pool', message: error.message });
-  }
-});
-
-// 获取API Key关联的共享池
-router.get('/api-keys/:keyId/pools', authenticateAdmin, async (req, res) => {
-  try {
-    const { keyId } = req.params;
-    
-    const pools = await apiKeyService.getApiKeyPools(keyId);
-    
-    res.json({ success: true, data: pools });
-  } catch (error) {
-    logger.error('❌ Failed to get API key pools:', error);
-    res.status(500).json({ error: 'Failed to get API key pools', message: error.message });
-  }
-});
-
-// 获取共享池使用统计
-router.get('/shared-pools/:poolId/usage', authenticateAdmin, async (req, res) => {
-  try {
-    const { poolId } = req.params;
-    
-    const sharedPoolService = require('../services/sharedPoolService');
-    const pool = await sharedPoolService.getPool(poolId);
-    
-    if (!pool) {
-      return res.status(404).json({ error: 'Shared pool not found' });
-    }
-    
-    // 获取共享池的使用统计
-    const poolUsage = await redis.getPoolUsageStats(poolId);
-    
-    res.json({ success: true, data: poolUsage });
-  } catch (error) {
-    logger.error('❌ Failed to get pool usage stats:', error);
-    res.status(500).json({ error: 'Failed to get pool usage stats', message: error.message });
-  }
-});
-
-// 获取共享池中每个账户的使用统计
-router.get('/shared-pools/:poolId/usage/accounts', authenticateAdmin, async (req, res) => {
-  try {
-    const { poolId } = req.params;
-    const { date } = req.query; // 可选日期参数，格式：YYYY-MM-DD
-    
-    const sharedPoolService = require('../services/sharedPoolService');
-    const pool = await sharedPoolService.getPool(poolId);
-    
-    if (!pool) {
-      return res.status(404).json({ error: 'Shared pool not found' });
-    }
-    
-    // 获取池中所有账户的使用统计
-    const accountsUsage = await redis.getPoolAccountsUsage(poolId, date);
-    
-    res.json({ success: true, data: accountsUsage });
-  } catch (error) {
-    logger.error('❌ Failed to get pool accounts usage:', error);
-    res.status(500).json({ error: 'Failed to get pool accounts usage', message: error.message });
-  }
-});
-
-// 获取共享池中特定账户的使用统计
-router.get('/shared-pools/:poolId/usage/accounts/:accountId', authenticateAdmin, async (req, res) => {
-  try {
-    const { poolId, accountId } = req.params;
-    
-    const sharedPoolService = require('../services/sharedPoolService');
-    const pool = await sharedPoolService.getPool(poolId);
-    
-    if (!pool) {
-      return res.status(404).json({ error: 'Shared pool not found' });
-    }
-    
-    // 获取特定账户在池中的使用统计
-    const accountUsage = await redis.getPoolAccountUsageStats(poolId, accountId);
-    
-    res.json({ success: true, data: accountUsage });
-  } catch (error) {
-    logger.error('❌ Failed to get pool account usage:', error);
-    res.status(500).json({ error: 'Failed to get pool account usage', message: error.message });
   }
 });
 
