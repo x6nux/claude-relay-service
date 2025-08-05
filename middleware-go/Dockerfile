@@ -12,8 +12,8 @@ RUN go mod download
 # 复制源代码
 COPY . .
 
-# 构建应用
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o claude-middleware .
+# 构建应用（去除调试信息和符号表以减小体积）
+RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags="-s -w" -o claude-middleware .
 
 # 使用轻量级的alpine镜像作为运行环境
 FROM alpine:latest
