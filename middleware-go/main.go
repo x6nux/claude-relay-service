@@ -137,6 +137,13 @@ func main() {
 		})
 	})
 
+	// 统计API端点（公开访问，不需要认证）
+	statsGroup := r.Group("/stats")
+	{
+		statsGroup.GET("", statsHandler.GetStatistics)                          // GET /stats - 获取所有账户统计
+		statsGroup.GET("/account/:id", statsHandler.GetAccountStatistics)       // GET /stats/account/:id - 获取特定账户统计
+	}
+
 	// 创建需要认证的路由组
 	api := r.Group("/")
 	if authConfig.Enabled {
@@ -160,13 +167,8 @@ func main() {
 	// api.Use(proxy.AccountLoggingMiddleware())
 	// api.Use(proxy.AccountMetricsMiddleware(redisClient))
 
-	// 统计API端点（需要认证）
-	statsGroup := api.Group("/stats")
-	{
-		statsGroup.GET("", statsHandler.GetStatistics)                          // GET /stats - 获取所有账户统计
-		statsGroup.GET("/account/:id", statsHandler.GetAccountStatistics)       // GET /stats/account/:id - 获取特定账户统计
-		statsGroup.POST("/account/:id/reset", statsHandler.ResetAccountStatistics) // POST /stats/account/:id/reset - 重置账户统计
-	}
+	// 需要认证的统计管理端点
+	api.POST("/stats/account/:id/reset", statsHandler.ResetAccountStatistics) // POST /stats/account/:id/reset - 重置账户统计（需要认证）
 
 	// 代理所有请求到Claude API（需要认证）
 	api.Any("/v1/*path", proxyService.ProxyHandler)

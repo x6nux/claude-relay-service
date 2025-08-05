@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"claude-middleware/internal/redis"
@@ -19,8 +20,7 @@ type StatisticsResponse struct {
 
 // AccountStatistics represents statistics for a single account
 type AccountStatistics struct {
-	AccountID     string  `json:"accountId"`
-	AccountName   string  `json:"accountName"`
+	AccountID     string  `json:"accountId"`     // 已脱敏的账户ID
 	IsMAX         bool    `json:"isMAX"`
 	IsActive      bool    `json:"isActive"`
 	Status        string  `json:"status"`
@@ -36,7 +36,7 @@ type StatisticsSummary struct {
 	TotalRequests    int64   `json:"totalRequests"`
 	TotalErrors      int64   `json:"totalErrors"`
 	OverallErrorRate float64 `json:"overallErrorRate"`
-	BestAccount      string  `json:"bestAccount"`
+	BestAccount      string  `json:"bestAccount"`      // 已脱敏的账户ID
 	BestAccountScore float64 `json:"bestAccountScore"`
 }
 
@@ -52,6 +52,25 @@ func NewStatsHandler(redisClient *redis.Client, service *Service) *StatsHandler 
 		redisClient: redisClient,
 		service:     service,
 	}
+}
+
+// sanitizeAccountID 对账户ID进行脱敏处理，保留前3位和后3位，中间用*代替
+func sanitizeAccountID(accountID string) string {
+	if len(accountID) <= 3 {
+		// 如果ID太短，完全用*代替
+		return strings.Repeat("*", len(accountID))
+	}
+	
+	if len(accountID) <= 6 {
+		// 短ID，保留前2位，其余用*代替
+		return accountID[:2] + strings.Repeat("*", len(accountID)-2)
+	}
+	
+	// 标准脱敏：保留前3位和后3位，中间用*代替
+	prefix := accountID[:3]
+	suffix := accountID[len(accountID)-3:]
+	middle := strings.Repeat("*", len(accountID)-6)
+	return prefix + middle + suffix
 }
 
 // GetStatistics handles GET /stats requests
@@ -109,8 +128,7 @@ func (h *StatsHandler) GetStatistics(c *gin.Context) {
 		totalErrors += metrics.ErrorCount
 
 		accountStats = append(accountStats, AccountStatistics{
-			AccountID:     account.ID,
-			AccountName:   account.Name,
+			AccountID:     sanitizeAccountID(account.ID),
 			IsMAX:         account.IsMAX,
 			IsActive:      account.IsActive,
 			Status:        account.Status,
@@ -138,7 +156,7 @@ func (h *StatsHandler) GetStatistics(c *gin.Context) {
 			TotalRequests:    totalRequests,
 			TotalErrors:      totalErrors,
 			OverallErrorRate: overallErrorRate,
-			BestAccount:      bestAccount,
+			BestAccount:      sanitizeAccountID(bestAccount),
 			BestAccountScore: bestScore,
 		},
 	}
@@ -195,8 +213,7 @@ func (h *StatsHandler) GetAccountStatistics(c *gin.Context) {
 	score := h.service.calculateAccountScore(metrics)
 
 	accountStat := AccountStatistics{
-		AccountID:     targetAccount.ID,
-		AccountName:   targetAccount.Name,
+		AccountID:     sanitizeAccountID(targetAccount.ID),
 		IsMAX:         targetAccount.IsMAX,
 		IsActive:      targetAccount.IsActive,
 		Status:        targetAccount.Status,
@@ -233,6 +250,6 @@ func (h *StatsHandler) ResetAccountStatistics(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Account statistics reset successfully",
-		"accountId": accountID,
+		"accountId": sanitizeAccountID(accountID),
 	})
 }
