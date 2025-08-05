@@ -64,15 +64,33 @@
         
         .stat-card {
             background: white;
-            border-radius: 15px;
-            padding: 25px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 6px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            opacity: 0;
+            transition: opacity 0.3s ease;
         }
         
         .stat-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.15);
+            transform: translateY(-8px) scale(1.02);
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
+        }
+        
+        .stat-card:hover::before {
+            opacity: 1;
         }
         
         .stat-card .label {
@@ -85,10 +103,14 @@
         }
         
         .stat-card .value {
-            font-size: 32px;
-            font-weight: bold;
+            font-size: 36px;
+            font-weight: 800;
             color: #1f2937;
-            margin-bottom: 5px;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
         
         .stat-card .meta {
@@ -96,9 +118,20 @@
             font-size: 12px;
         }
         
-        .stat-card.blue { border-top: 4px solid #3b82f6; }
-        .stat-card.red { border-top: 4px solid #ef4444; }
-        .stat-card.green { border-top: 4px solid #10b981; }
+        .stat-card.blue {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.05), rgba(147, 197, 253, 0.05));
+            border-left: 5px solid #3b82f6;
+        }
+        
+        .stat-card.red {
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.05), rgba(252, 165, 165, 0.05));
+            border-left: 5px solid #ef4444;
+        }
+        
+        .stat-card.green {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.05), rgba(167, 243, 208, 0.05));
+            border-left: 5px solid #10b981;
+        }
         
         .account-details {
             display: flex;
@@ -124,10 +157,23 @@
         
         .table-container {
             background: white;
-            border-radius: 15px;
-            padding: 25px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
             overflow-x: auto;
+            position: relative;
+            backdrop-filter: blur(10px);
+        }
+        
+        .table-container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            border-radius: 20px 20px 0 0;
         }
         
         .table-header {
@@ -167,8 +213,13 @@
             font-size: 14px;
         }
         
+        tbody tr {
+            transition: all 0.2s ease;
+        }
+        
         tbody tr:hover {
-            background: #f9fafb;
+            background: linear-gradient(90deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05));
+            transform: scale(1.01);
         }
         
         .account-id {
@@ -179,12 +230,19 @@
         
         .badge {
             display: inline-block;
-            padding: 4px 10px;
-            border-radius: 12px;
+            padding: 6px 12px;
+            border-radius: 16px;
             font-size: 11px;
-            font-weight: 600;
+            font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            transition: all 0.2s ease;
+        }
+        
+        .badge:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
         }
         
         .badge-active {
@@ -301,6 +359,78 @@
             
             table {
                 font-size: 12px;
+            }
+        }
+        
+        /* 暗色模式支持 */
+        @media (prefers-color-scheme: dark) {
+            body {
+                background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            }
+            
+            .header {
+                background: rgba(30, 41, 59, 0.8);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            
+            .stat-card {
+                background: rgba(30, 41, 59, 0.9);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            
+            .stat-card.blue {
+                background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(147, 197, 253, 0.15));
+            }
+            
+            .stat-card.red {
+                background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(252, 165, 165, 0.15));
+            }
+            
+            .stat-card.green {
+                background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(167, 243, 208, 0.15));
+            }
+            
+            .stat-card .label {
+                color: #94a3b8;
+            }
+            
+            .stat-card .meta {
+                color: #64748b;
+            }
+            
+            .account-label {
+                color: #94a3b8;
+            }
+            
+            .account-value {
+                color: #f1f5f9;
+            }
+            
+            .table-container {
+                background: rgba(30, 41, 59, 0.9);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            
+            .table-title {
+                color: #f1f5f9;
+            }
+            
+            thead th {
+                color: #94a3b8;
+                border-bottom-color: rgba(255, 255, 255, 0.1);
+            }
+            
+            tbody td {
+                border-bottom-color: rgba(255, 255, 255, 0.05);
+                color: #e2e8f0;
+            }
+            
+            tbody tr:hover {
+                background: linear-gradient(90deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+            }
+            
+            .account-id {
+                color: #cbd5e1;
             }
         }
     </style>
