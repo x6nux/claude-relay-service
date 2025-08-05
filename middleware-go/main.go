@@ -73,6 +73,9 @@ func main() {
 	// 初始化代理服务
 	proxyService := proxy.NewService(redisClient, cfg)
 
+	// 初始化统计服务处理器
+	statsHandler := proxy.NewStatsHandler(redisClient, proxyService)
+
 	// 初始化请求日志记录器
 	requestLogger := requestlog.NewRequestLogger(&cfg.RequestLog)
 
@@ -156,6 +159,14 @@ func main() {
 	// 添加账户日志中间件（可选，用于调试）
 	// api.Use(proxy.AccountLoggingMiddleware())
 	// api.Use(proxy.AccountMetricsMiddleware(redisClient))
+
+	// 统计API端点（需要认证）
+	statsGroup := api.Group("/stats")
+	{
+		statsGroup.GET("", statsHandler.GetStatistics)                          // GET /stats - 获取所有账户统计
+		statsGroup.GET("/account/:id", statsHandler.GetAccountStatistics)       // GET /stats/account/:id - 获取特定账户统计
+		statsGroup.POST("/account/:id/reset", statsHandler.ResetAccountStatistics) // POST /stats/account/:id/reset - 重置账户统计
+	}
 
 	// 代理所有请求到Claude API（需要认证）
 	api.Any("/v1/*path", proxyService.ProxyHandler)

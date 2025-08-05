@@ -259,3 +259,8 @@ func (c *Client) GetAllAccountMetrics() (map[string]*AccountMetrics, error) {
 	
 	return result, nil
 }
+
+// DeleteKey deletes a key from Redis
+func (c *Client) DeleteKey(key string) error {
+	return c.client.Del(c.ctx, key).Err()
+}
