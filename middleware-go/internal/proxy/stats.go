@@ -1,34 +1,37 @@
 package proxy
 
 import (
+	"bytes"
+	"html/template"
 	"net/http"
 	"strings"
 	"time"
 
 	"claude-middleware/internal/redis"
+
 	"github.com/gin-gonic/gin"
 )
 
 // StatisticsResponse represents the response structure for statistics API
 type StatisticsResponse struct {
-	Timestamp     int64                    `json:"timestamp"`
-	TotalAccounts int                      `json:"totalAccounts"`
-	ActiveAccounts int                     `json:"activeAccounts"`
-	Accounts      []AccountStatistics      `json:"accounts"`
-	Summary       StatisticsSummary        `json:"summary"`
+	Timestamp      int64               `json:"timestamp"`
+	TotalAccounts  int                 `json:"totalAccounts"`
+	ActiveAccounts int                 `json:"activeAccounts"`
+	Accounts       []AccountStatistics `json:"accounts"`
+	Summary        StatisticsSummary   `json:"summary"`
 }
 
 // AccountStatistics represents statistics for a single account
 type AccountStatistics struct {
-	AccountID     string  `json:"accountId"`     // 已脱敏的账户ID
-	IsMAX         bool    `json:"isMAX"`
-	IsActive      bool    `json:"isActive"`
-	Status        string  `json:"status"`
-	RequestCount  int64   `json:"requestCount"`
-	ErrorCount    int64   `json:"errorCount"`
-	ErrorRate     float64 `json:"errorRate"`
-	Score         float64 `json:"score"`
-	LastUpdated   int64   `json:"lastUpdated"`
+	AccountID    string  `json:"accountId"` // 已脱敏的账户ID
+	IsMAX        bool    `json:"isMAX"`
+	IsActive     bool    `json:"isActive"`
+	Status       string  `json:"status"`
+	RequestCount int64   `json:"requestCount"`
+	ErrorCount   int64   `json:"errorCount"`
+	ErrorRate    float64 `json:"errorRate"`
+	Score        float64 `json:"score"`
+	LastUpdated  int64   `json:"lastUpdated"`
 }
 
 // StatisticsSummary represents overall statistics summary
@@ -36,7 +39,7 @@ type StatisticsSummary struct {
 	TotalRequests    int64   `json:"totalRequests"`
 	TotalErrors      int64   `json:"totalErrors"`
 	OverallErrorRate float64 `json:"overallErrorRate"`
-	BestAccount      string  `json:"bestAccount"`      // 已脱敏的账户ID
+	BestAccount      string  `json:"bestAccount"` // 已脱敏的账户ID
 	BestAccountScore float64 `json:"bestAccountScore"`
 }
 
@@ -44,13 +47,23 @@ type StatisticsSummary struct {
 type StatsHandler struct {
 	redisClient *redis.Client
 	service     *Service
+	templates   *template.Template
 }
 
 // NewStatsHandler creates a new statistics handler
 func NewStatsHandler(redisClient *redis.Client, service *Service) *StatsHandler {
+	// 加载嵌入的模板
+	templates, err := LoadEmbeddedTemplates()
+	if err != nil {
+		// 如果加载失败，使用空模板
+		println("⚠️ Failed to load embedded templates:", err.Error())
+		templates = template.New("")
+	}
+	
 	return &StatsHandler{
 		redisClient: redisClient,
 		service:     service,
+		templates:   templates,
 	}
 }
 
@@ -60,12 +73,12 @@ func sanitizeAccountID(accountID string) string {
 		// 如果ID太短，完全用*代替
 		return strings.Repeat("*", len(accountID))
 	}
-	
+
 	if len(accountID) <= 6 {
 		// 短ID，保留前2位，其余用*代替
 		return accountID[:2] + strings.Repeat("*", len(accountID)-2)
 	}
-	
+
 	// 标准脱敏：保留前3位和后3位，中间用*代替
 	prefix := accountID[:3]
 	suffix := accountID[len(accountID)-3:]
@@ -79,7 +92,7 @@ func (h *StatsHandler) GetStatistics(c *gin.Context) {
 	accounts, err := h.redisClient.GetAllActiveAccounts()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to fetch accounts",
+			"error":   "Failed to fetch accounts",
 			"details": err.Error(),
 		})
 		return
@@ -89,7 +102,7 @@ func (h *StatsHandler) GetStatistics(c *gin.Context) {
 	allMetrics, err := h.redisClient.GetAllAccountMetrics()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to fetch account metrics",
+			"error":   "Failed to fetch account metrics",
 			"details": err.Error(),
 		})
 		return
@@ -116,7 +129,7 @@ func (h *StatsHandler) GetStatistics(c *gin.Context) {
 
 		// 计算账户评分
 		score := h.service.calculateAccountScore(metrics)
-		
+
 		// 记录最高分账户
 		if score > bestScore {
 			bestScore = score
@@ -128,15 +141,15 @@ func (h *StatsHandler) GetStatistics(c *gin.Context) {
 		totalErrors += metrics.ErrorCount
 
 		accountStats = append(accountStats, AccountStatistics{
-			AccountID:     sanitizeAccountID(account.ID),
-			IsMAX:         account.IsMAX,
-			IsActive:      account.IsActive,
-			Status:        account.Status,
-			RequestCount:  metrics.RequestCount,
-			ErrorCount:    metrics.ErrorCount,
-			ErrorRate:     metrics.ErrorRate,
-			Score:         score,
-			LastUpdated:   metrics.LastUpdated,
+			AccountID:    sanitizeAccountID(account.ID),
+			IsMAX:        account.IsMAX,
+			IsActive:     account.IsActive,
+			Status:       account.Status,
+			RequestCount: metrics.RequestCount,
+			ErrorCount:   metrics.ErrorCount,
+			ErrorRate:    metrics.ErrorRate,
+			Score:        score,
+			LastUpdated:  metrics.LastUpdated,
 		})
 	}
 
@@ -178,7 +191,7 @@ func (h *StatsHandler) GetAccountStatistics(c *gin.Context) {
 	accounts, err := h.redisClient.GetAllActiveAccounts()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to fetch accounts",
+			"error":   "Failed to fetch accounts",
 			"details": err.Error(),
 		})
 		return
@@ -203,7 +216,7 @@ func (h *StatsHandler) GetAccountStatistics(c *gin.Context) {
 	metrics, err := h.redisClient.GetAccountMetrics(accountID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to fetch account metrics",
+			"error":   "Failed to fetch account metrics",
 			"details": err.Error(),
 		})
 		return
@@ -213,15 +226,15 @@ func (h *StatsHandler) GetAccountStatistics(c *gin.Context) {
 	score := h.service.calculateAccountScore(metrics)
 
 	accountStat := AccountStatistics{
-		AccountID:     sanitizeAccountID(targetAccount.ID),
-		IsMAX:         targetAccount.IsMAX,
-		IsActive:      targetAccount.IsActive,
-		Status:        targetAccount.Status,
-		RequestCount:  metrics.RequestCount,
-		ErrorCount:    metrics.ErrorCount,
-		ErrorRate:     metrics.ErrorRate,
-		Score:         score,
-		LastUpdated:   metrics.LastUpdated,
+		AccountID:    sanitizeAccountID(targetAccount.ID),
+		IsMAX:        targetAccount.IsMAX,
+		IsActive:     targetAccount.IsActive,
+		Status:       targetAccount.Status,
+		RequestCount: metrics.RequestCount,
+		ErrorCount:   metrics.ErrorCount,
+		ErrorRate:    metrics.ErrorRate,
+		Score:        score,
+		LastUpdated:  metrics.LastUpdated,
 	}
 
 	c.JSON(http.StatusOK, accountStat)
@@ -242,14 +255,195 @@ func (h *StatsHandler) ResetAccountStatistics(c *gin.Context) {
 	err := h.redisClient.DeleteKey(key)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to reset account statistics",
+			"error":   "Failed to reset account statistics",
 			"details": err.Error(),
 		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Account statistics reset successfully",
+		"message":   "Account statistics reset successfully",
 		"accountId": sanitizeAccountID(accountID),
 	})
+}
+
+// StatsPageData represents data for the stats HTML page
+type StatsPageData struct {
+	UpdateTime       string
+	TotalAccounts    int
+	ActiveAccounts   int
+	Summary          StatisticsSummary
+	AccountStats     AccountStatsInfo
+	Accounts         []AccountStatisticsDisplay
+	ErrorRatePercent float64
+}
+
+// AccountStatsInfo represents account type statistics
+type AccountStatsInfo struct {
+	Total      int
+	Active     int
+	MaxTotal   int
+	MaxActive  int
+	ProTotal   int
+	ProActive  int
+}
+
+// AccountStatisticsDisplay represents account data for HTML display
+type AccountStatisticsDisplay struct {
+	AccountStatistics
+	ScoreClass           string
+	ErrorRateClass       string
+	ErrorRatePercent     float64
+	LastUpdatedFormatted string
+}
+
+// GetStatsPage handles GET /stats.html requests
+func (h *StatsHandler) GetStatsPage(c *gin.Context) {
+	// 获取所有活跃账户
+	accounts, err := h.redisClient.GetAllActiveAccounts()
+	if err != nil {
+		c.HTML(http.StatusInternalServerError, "stats.html", gin.H{
+			"error": "Failed to fetch accounts",
+		})
+		return
+	}
+	
+	// 获取所有账户的统计指标
+	allMetrics, err := h.redisClient.GetAllAccountMetrics()
+	if err != nil {
+		c.HTML(http.StatusInternalServerError, "stats.html", gin.H{
+			"error": "Failed to fetch account metrics",
+		})
+		return
+	}
+
+	// 初始化统计数据
+	var totalRequests, totalErrors int64
+	var bestAccount string
+	var bestScore float64
+	accountStatsList := make([]AccountStatisticsDisplay, 0, len(accounts))
+	
+	// 账户类型统计
+	accountStats := AccountStatsInfo{}
+	accountStats.Total = len(accounts)
+
+	// 遍历账户，计算统计数据
+	for _, account := range accounts {
+		// 从allMetrics中查找当前账户的指标
+		metrics := allMetrics[account.ID]
+		if metrics == nil {
+			metrics = &redis.AccountMetrics{
+				RequestCount: 0,
+				ErrorCount:   0,
+				ErrorRate:    0.0,
+			}
+		}
+		
+		// 计算账户评分
+		score := h.service.calculateAccountScore(metrics)
+		
+		// 更新总计数
+		totalRequests += metrics.RequestCount
+		totalErrors += metrics.ErrorCount
+		
+		// 更新最佳账户
+		if score > bestScore {
+			bestScore = score
+			bestAccount = sanitizeAccountID(account.ID)
+		}
+		
+		// 账户类型统计
+		if account.IsActive {
+			accountStats.Active++
+		}
+		if account.IsMAX {
+			accountStats.MaxTotal++
+			if account.IsActive {
+				accountStats.MaxActive++
+			}
+		} else {
+			accountStats.ProTotal++
+			if account.IsActive {
+				accountStats.ProActive++
+			}
+		}
+		
+		// 准备显示数据
+		display := AccountStatisticsDisplay{
+			AccountStatistics: AccountStatistics{
+				AccountID:     sanitizeAccountID(account.ID),
+				IsMAX:         account.IsMAX,
+				IsActive:      account.IsActive,
+				Status:        account.Status,
+				RequestCount:  metrics.RequestCount,
+				ErrorCount:    metrics.ErrorCount,
+				ErrorRate:     metrics.ErrorRate,
+				Score:         score,
+				LastUpdated:   metrics.LastUpdated,
+			},
+			ErrorRatePercent: metrics.ErrorRate * 100,
+		}
+		
+		// 设置样式类
+		if score >= 80 {
+			display.ScoreClass = "high"
+		} else if score >= 60 {
+			display.ScoreClass = "medium"
+		} else {
+			display.ScoreClass = "low"
+		}
+		
+		if metrics.ErrorRate <= 0.01 {
+			display.ErrorRateClass = "low"
+		} else if metrics.ErrorRate <= 0.05 {
+			display.ErrorRateClass = "medium"
+		} else {
+			display.ErrorRateClass = "high"
+		}
+		
+		// 格式化时间
+		if metrics.LastUpdated > 0 {
+			display.LastUpdatedFormatted = time.Unix(metrics.LastUpdated/1000, 0).Format("2006-01-02 15:04:05")
+		} else {
+			display.LastUpdatedFormatted = "N/A"
+		}
+		
+		accountStatsList = append(accountStatsList, display)
+	}
+	
+	// 计算总体错误率
+	var overallErrorRate float64
+	if totalRequests > 0 {
+		overallErrorRate = float64(totalErrors) / float64(totalRequests)
+	}
+	
+	// 准备页面数据
+	pageData := StatsPageData{
+		UpdateTime:       time.Now().Format("2006-01-02 15:04:05"),
+		TotalAccounts:    len(accounts),
+		ActiveAccounts:   accountStats.Active,
+		AccountStats:     accountStats,
+		Summary: StatisticsSummary{
+			TotalRequests:    totalRequests,
+			TotalErrors:      totalErrors,
+			OverallErrorRate: overallErrorRate,
+			BestAccount:      bestAccount,
+			BestAccountScore: bestScore,
+		},
+		ErrorRatePercent: overallErrorRate * 100,
+		Accounts:         accountStatsList,
+	}
+	
+	// 渲染HTML模板
+	var buf bytes.Buffer
+	err = h.templates.ExecuteTemplate(&buf, "stats.html", pageData)
+	if err != nil {
+		c.HTML(http.StatusInternalServerError, "stats.html", gin.H{
+			"error": "Failed to render template: " + err.Error(),
+		})
+		return
+	}
+	
+	// 返回渲染的HTML
+	c.Data(http.StatusOK, "text/html; charset=utf-8", buf.Bytes())
 }

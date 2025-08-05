@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Relay - 统计监控</title>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px 30px;
+            margin-bottom: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .header h1 {
+            color: white;
+            font-size: 28px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .header .subtitle {
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        
+        .update-time {
+            color: white;
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.15);
+        }
+        
+        .stat-card .label {
+            color: #6b7280;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 15px;
+            font-weight: 600;
+        }
+        
+        .stat-card .value {
+            font-size: 32px;
+            font-weight: bold;
+            color: #1f2937;
+            margin-bottom: 5px;
+        }
+        
+        .stat-card .meta {
+            color: #9ca3af;
+            font-size: 12px;
+        }
+        
+        .stat-card.blue { border-top: 4px solid #3b82f6; }
+        .stat-card.red { border-top: 4px solid #ef4444; }
+        .stat-card.green { border-top: 4px solid #10b981; }
+        
+        .account-details {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .account-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .account-label {
+            color: #6b7280;
+            font-size: 13px;
+        }
+        
+        .account-value {
+            font-weight: 600;
+            color: #1f2937;
+        }
+        
+        .table-container {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            overflow-x: auto;
+        }
+        
+        .table-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+        
+        .table-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #1f2937;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        thead th {
+            text-align: left;
+            padding: 12px;
+            color: #6b7280;
+            font-weight: 600;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+        
+        tbody td {
+            padding: 12px;
+            border-bottom: 1px solid #f3f4f6;
+            font-size: 14px;
+        }
+        
+        tbody tr:hover {
+            background: #f9fafb;
+        }
+        
+        .account-id {
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            color: #4b5563;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .badge-active {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        
+        .badge-inactive {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        
+        .badge-max {
+            background: #fef3c7;
+            color: #92400e;
+            margin-right: 8px;
+        }
+        
+        .score-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .score-progress {
+            flex: 1;
+            max-width: 100px;
+            height: 8px;
+            background: #e5e7eb;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .score-fill {
+            height: 100%;
+            transition: width 0.5s ease;
+            border-radius: 4px;
+        }
+        
+        .score-fill.high { background: linear-gradient(90deg, #10b981, #059669); }
+        .score-fill.medium { background: linear-gradient(90deg, #f59e0b, #d97706); }
+        .score-fill.low { background: linear-gradient(90deg, #ef4444, #dc2626); }
+        
+        .score-text {
+            font-weight: 600;
+            font-size: 13px;
+            min-width: 45px;
+        }
+        
+        .error-badge {
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .error-low {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        
+        .error-medium {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .error-high {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #9ca3af;
+        }
+        
+        .error-display {
+            display: flex;
+            gap: 20px;
+            align-items: baseline;
+        }
+        
+        .error-group {
+            flex: 1;
+        }
+        
+        .error-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #ef4444;
+        }
+        
+        .error-label {
+            font-size: 11px;
+            color: #9ca3af;
+            margin-top: 4px;
+        }
+        
+        @media (max-width: 768px) {
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+            
+            .table-container {
+                padding: 15px;
+            }
+            
+            table {
+                font-size: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div>
+                <h1>
+                    📊 统计监控中心
+                </h1>
+                <div class="subtitle">Claude Relay Service Statistics</div>
+            </div>
+            <div class="update-time">
+                更新时间: {{.UpdateTime}}
+            </div>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="stats-grid">
+            <!-- Account Statistics Card -->
+            <div class="stat-card blue">
+                <div class="label">账户统计</div>
+                <div class="account-details">
+                    <div class="account-row">
+                        <span class="account-label">总数:</span>
+                        <span class="account-value">{{.AccountStats.Total}}</span>
+                    </div>
+                    <div class="account-row">
+                        <span class="account-label">活跃:</span>
+                        <span class="account-value">{{.AccountStats.Active}}</span>
+                    </div>
+                    <div class="account-row">
+                        <span class="account-label">MAX:</span>
+                        <span class="account-value">{{.AccountStats.MaxTotal}} ({{.AccountStats.MaxActive}}活跃)</span>
+                    </div>
+                    <div class="account-row">
+                        <span class="account-label">PRO:</span>
+                        <span class="account-value">{{.AccountStats.ProTotal}} ({{.AccountStats.ProActive}}活跃)</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Request Statistics Card -->
+            <div class="stat-card green">
+                <div class="label">请求统计</div>
+                <div class="value">{{.Summary.TotalRequests}}</div>
+                <div class="meta">总请求数</div>
+            </div>
+            
+            <!-- Error Statistics Card -->
+            <div class="stat-card red">
+                <div class="label">错误统计</div>
+                <div class="error-display">
+                    <div class="error-group">
+                        <div class="error-value">{{.Summary.TotalErrors}}</div>
+                        <div class="error-label">错误数</div>
+                    </div>
+                    <div class="error-group">
+                        <div class="error-value">{{printf "%.2f%%" .ErrorRatePercent}}</div>
+                        <div class="error-label">错误率</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Accounts Table -->
+        <div class="table-container">
+            <div class="table-header">
+                <h2 class="table-title">账户统计详情</h2>
+                <span style="color: #6b7280; font-size: 14px;">
+                    共 {{.TotalAccounts}} 个账户，{{.ActiveAccounts}} 个活跃
+                </span>
+            </div>
+            
+            {{if .Accounts}}
+            <table>
+                <thead>
+                    <tr>
+                        <th>账户ID</th>
+                        <th>状态</th>
+                        <th>评分</th>
+                        <th>请求数</th>
+                        <th>错误数</th>
+                        <th>错误率</th>
+                        <th>最后更新</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Accounts}}
+                    <tr>
+                        <td>
+                            {{if .IsMAX}}<span class="badge badge-max">MAX</span>{{end}}
+                            <span class="account-id">{{.AccountID}}</span>
+                        </td>
+                        <td>
+                            <span class="badge {{if .IsActive}}badge-active{{else}}badge-inactive{{end}}">
+                                {{if .IsActive}}活跃{{else}}非活跃{{end}}
+                            </span>
+                        </td>
+                        <td>
+                            <div class="score-bar">
+                                <div class="score-progress">
+                                    <div 
+                                        class="score-fill {{.ScoreClass}}"
+                                        style="width: {{.Score}}%">
+                                    </div>
+                                </div>
+                                <span class="score-text">{{printf "%.1f" .Score}}</span>
+                            </div>
+                        </td>
+                        <td>{{.RequestCount}}</td>
+                        <td style="color: #ef4444;">{{.ErrorCount}}</td>
+                        <td>
+                            <span class="error-badge error-{{.ErrorRateClass}}">
+                                {{printf "%.2f%%" .ErrorRatePercent}}
+                            </span>
+                        </td>
+                        <td style="color: #6b7280; font-size: 13px;">
+                            {{.LastUpdatedFormatted}}
+                        </td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+            {{else}}
+            <div class="empty-state">
+                <h3 style="font-size: 18px; margin-bottom: 10px; color: #4b5563;">暂无数据</h3>
+                <p>统计数据将在账户开始处理请求后显示</p>
+            </div>
+            {{end}}
+        </div>
+    </div>
+
+    <script>
+        // 自动刷新页面（每30秒）
+        setTimeout(function() {
+            location.reload();
+        }, 30000);
+    </script>
+</body>
+</html>
