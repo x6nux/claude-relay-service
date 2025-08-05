@@ -70,10 +70,9 @@ async function handleMessagesRequest(req, res) {
           const cacheReadTokens = usageData.cache_read_input_tokens || 0;
           const model = usageData.model || 'unknown';
           
-          // 记录真实的token使用量（包含模型信息和所有4种token以及账户ID和池ID）
+          // 记录真实的token使用量（包含模型信息和所有4种token以及账户ID）
           const accountId = usageData.accountId;
-          const poolId = usageData.poolId;
-          apiKeyService.recordUsage(req.apiKey.id, inputTokens, outputTokens, cacheCreateTokens, cacheReadTokens, model, accountId, poolId).catch(error => {
+          apiKeyService.recordUsage(req.apiKey.id, inputTokens, outputTokens, cacheCreateTokens, cacheReadTokens, model, accountId).catch(error => {
             logger.error('❌ Failed to record stream usage:', error);
           });
           
@@ -139,10 +138,9 @@ async function handleMessagesRequest(req, res) {
           const cacheReadTokens = jsonData.usage.cache_read_input_tokens || 0;
           const model = jsonData.model || req.body.model || 'unknown';
           
-          // 记录真实的token使用量（包含模型信息和所有4种token以及账户ID和池ID）
+          // 记录真实的token使用量（包含模型信息和所有4种token以及账户ID）
           const accountId = response.accountId;
-          const poolId = response.poolId;
-          await apiKeyService.recordUsage(req.apiKey.id, inputTokens, outputTokens, cacheCreateTokens, cacheReadTokens, model, accountId, poolId);
+          await apiKeyService.recordUsage(req.apiKey.id, inputTokens, outputTokens, cacheCreateTokens, cacheReadTokens, model, accountId);
           
           // 更新时间窗口内的token计数
           if (req.rateLimitInfo) {
