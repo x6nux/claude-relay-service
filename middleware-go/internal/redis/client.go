@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"claude-middleware/internal/config"
 	"github.com/redis/go-redis/v9"
@@ -150,4 +151,111 @@ func (c *Client) parseAccountData(data map[string]string) (ClaudeAccount, error)
 	}
 	
 	return account, nil
+}
+
+// AccountMetrics represents metrics for an account
+type AccountMetrics struct {
+	AccountID    string  `json:"accountId"`
+	RequestCount int64   `json:"requestCount"`
+	ErrorCount   int64   `json:"errorCount"`
+	ErrorRate    float64 `json:"errorRate"`
+	Score        float64 `json:"score"`        // 加权评分
+	LastUpdated  int64   `json:"lastUpdated"` // 上次更新时间戳
+}
+
+// GetAccountMetrics 获取账户的统计指标
+func (c *Client) GetAccountMetrics(accountID string) (*AccountMetrics, error) {
+	key := fmt.Sprintf("middleware:metrics:%s", accountID)
+	data, err := c.client.HGetAll(c.ctx, key).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get account metrics: %w", err)
+	}
+	
+	metrics := &AccountMetrics{
+		AccountID: accountID,
+	}
+	
+	if len(data) == 0 {
+		// 新账户，返回默认值
+		return metrics, nil
+	}
+	
+	if reqCount, ok := data["requestCount"]; ok {
+		if count, err := strconv.ParseInt(reqCount, 10, 64); err == nil {
+			metrics.RequestCount = count
+		}
+	}
+	
+	if errCount, ok := data["errorCount"]; ok {
+		if count, err := strconv.ParseInt(errCount, 10, 64); err == nil {
+			metrics.ErrorCount = count
+		}
+	}
+	
+	if lastUpdated, ok := data["lastUpdated"]; ok {
+		if ts, err := strconv.ParseInt(lastUpdated, 10, 64); err == nil {
+			metrics.LastUpdated = ts
+		}
+	}
+	
+	// 计算错误率
+	if metrics.RequestCount > 0 {
+		metrics.ErrorRate = float64(metrics.ErrorCount) / float64(metrics.RequestCount)
+	}
+	
+	return metrics, nil
+}
+
+// IncrementRequestCount 增加账户的请求计数
+func (c *Client) IncrementRequestCount(accountID string) error {
+	key := fmt.Sprintf("middleware:metrics:%s", accountID)
+	now := time.Now().Unix()
+	
+	pipe := c.client.Pipeline()
+	pipe.HIncrBy(c.ctx, key, "requestCount", 1)
+	pipe.HSet(c.ctx, key, "lastUpdated", now)
+	pipe.Expire(c.ctx, key, 7*24*time.Hour) // 7天过期
+	
+	_, err := pipe.Exec(c.ctx)
+	return err
+}
+
+// IncrementErrorCount 增加账户的错误计数
+func (c *Client) IncrementErrorCount(accountID string) error {
+	key := fmt.Sprintf("middleware:metrics:%s", accountID)
+	now := time.Now().Unix()
+	
+	pipe := c.client.Pipeline()
+	pipe.HIncrBy(c.ctx, key, "errorCount", 1)
+	pipe.HSet(c.ctx, key, "lastUpdated", now)
+	pipe.Expire(c.ctx, key, 7*24*time.Hour) // 7天过期
+	
+	_, err := pipe.Exec(c.ctx)
+	return err
+}
+
+// GetAllAccountMetrics 获取所有账户的统计指标
+func (c *Client) GetAllAccountMetrics() (map[string]*AccountMetrics, error) {
+	pattern := "middleware:metrics:*"
+	keys, err := c.client.Keys(c.ctx, pattern).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get metric keys: %w", err)
+	}
+	
+	result := make(map[string]*AccountMetrics)
+	
+	for _, key := range keys {
+		// 提取账户ID（去掉前缀 "middleware:metrics:"）
+		accountID := key[len("middleware:metrics:"):]
+		
+		metrics, err := c.GetAccountMetrics(accountID)
+		if err != nil {
+			fmt.Printf("[DEBUG] Failed to get metrics for account %s: %v\n", accountID, err)
+			continue
+		}
+		
+		result[accountID] = metrics
+	}
+	
+	return result, nil
 }

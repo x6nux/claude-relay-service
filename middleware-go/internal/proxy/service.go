@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math"
 	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -133,7 +135,19 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 		// 尝试发送请求
 		success := s.attemptRequest(c, accountID, bodyBytes, requestPath, retryCount, maxRetries)
 		if success {
+			// 记录成功的请求
+			if err := s.redisClient.IncrementRequestCount(accountID); err != nil {
+				fmt.Printf("[DEBUG] Failed to record request count for account %s: %v\n", accountID, err)
+			}
 			return // 请求成功，结束重试
+		} else {
+			// 记录失败的请求（既增加请求数也增加错误数）
+			if err := s.redisClient.IncrementRequestCount(accountID); err != nil {
+				fmt.Printf("[DEBUG] Failed to record request count for account %s: %v\n", accountID, err)
+			}
+			if err := s.redisClient.IncrementErrorCount(accountID); err != nil {
+				fmt.Printf("[DEBUG] Failed to record error count for account %s: %v\n", accountID, err)
+			}
 		}
 	}
 	
@@ -326,9 +340,29 @@ func (s *Service) selectAvailableAccountWithExclusions(excludeAccountIDs map[str
 		return "", fmt.Errorf("no accounts available")
 	}
 	
-	// 随机选择账号（负载均衡）
-	randomIndex := rand.Intn(len(selectedAccounts))
-	selected := selectedAccounts[randomIndex]
+	// 使用智能选择算法替代随机选择
+	selectedAccountID, err := s.selectBestAccount(selectedAccounts)
+	if err != nil {
+		fmt.Printf("[WARN] Intelligent selection failed, falling back to random: %v\n", err)
+		// 如果智能选择失败，回退到随机选择
+		randomIndex := rand.Intn(len(selectedAccounts))
+		selectedAccountID = selectedAccounts[randomIndex].ID
+	}
+	
+	// 查找选中的账户信息
+	var selected *redis.ClaudeAccount
+	for _, account := range selectedAccounts {
+		if account.ID == selectedAccountID {
+			selected = &account
+			break
+		}
+	}
+	
+	if selected == nil {
+		// 不应该发生，但为了安全起见
+		selected = &selectedAccounts[0]
+	}
+	
 	accountType := "regular"
 	if selected.IsMAX {
 		accountType = "MAX"
@@ -336,6 +370,142 @@ func (s *Service) selectAvailableAccountWithExclusions(excludeAccountIDs map[str
 	
 	fmt.Printf("[INFO] ✅ Selected %s account: %s (%s)\n", accountType, selected.ID, selected.Name)
 	return selected.ID, nil
+}
+
+// AccountScore represents an account with its calculated score
+type AccountScore struct {
+	Account redis.ClaudeAccount
+	Score   float64
+	Metrics *redis.AccountMetrics
+}
+
+// selectBestAccount 使用加权评分算法选择最佳账户
+func (s *Service) selectBestAccount(accounts []redis.ClaudeAccount) (string, error) {
+	if len(accounts) == 0 {
+		return "", fmt.Errorf("no accounts provided")
+	}
+	
+	if len(accounts) == 1 {
+		return accounts[0].ID, nil
+	}
+	
+	// 获取所有账户的统计指标
+	allMetrics, err := s.redisClient.GetAllAccountMetrics()
+	if err != nil {
+		fmt.Printf("[DEBUG] Failed to get account metrics, using random selection: %v\n", err)
+		return "", err
+	}
+	
+	var accountScores []AccountScore
+	
+	// 为每个账户计算评分
+	for _, account := range accounts {
+		metrics, exists := allMetrics[account.ID]
+		if !exists {
+			// 新账户，创建默认指标
+			metrics = &redis.AccountMetrics{
+				AccountID:    account.ID,
+				RequestCount: 0,
+				ErrorCount:   0,
+				ErrorRate:    0.0,
+			}
+		}
+		
+		score := s.calculateAccountScore(metrics)
+		accountScores = append(accountScores, AccountScore{
+			Account: account,
+			Score:   score,
+			Metrics: metrics,
+		})
+	}
+	
+	// 按评分排序（降序，分数越高越好）
+	sort.Slice(accountScores, func(i, j int) bool {
+		return accountScores[i].Score > accountScores[j].Score
+	})
+	
+	// 记录选择过程的详细信息
+	fmt.Printf("[DEBUG] 🧮 Account scoring results:\n")
+	for i, as := range accountScores {
+		fmt.Printf("[DEBUG]   %d. %s (Score: %.3f, Requests: %d, Errors: %d, ErrorRate: %.3f%%)\n", 
+			i+1, as.Account.ID, as.Score, as.Metrics.RequestCount, as.Metrics.ErrorCount, as.Metrics.ErrorRate*100)
+	}
+	
+	// 使用加权随机选择，分数越高被选中的概率越大
+	bestAccount := s.weightedRandomSelection(accountScores)
+	
+	fmt.Printf("[INFO] 🎯 Intelligent selection chose: %s (Score: %.3f)\n", bestAccount.Account.ID, bestAccount.Score)
+	return bestAccount.Account.ID, nil
+}
+
+// calculateAccountScore 计算账户的综合评分
+func (s *Service) calculateAccountScore(metrics *redis.AccountMetrics) float64 {
+	// 基础分数
+	baseScore := 100.0
+	
+	// 权重配置
+	const (
+		requestCountWeight = 0.3  // 请求次数权重（越少越好）
+		errorRateWeight    = 0.7  // 错误率权重（越低越好）
+	)
+	
+	// 请求次数评分：使用对数函数，请求次数越多分数越低
+	requestScore := baseScore
+	if metrics.RequestCount > 0 {
+		// 使用对数函数平滑处理，避免请求次数差异过大
+		requestScore = baseScore - (math.Log(float64(metrics.RequestCount)+1) * 10)
+		if requestScore < 0 {
+			requestScore = 0
+		}
+	}
+	
+	// 错误率评分：错误率越高分数越低
+	errorScore := baseScore * (1.0 - metrics.ErrorRate)
+	if errorScore < 0 {
+		errorScore = 0
+	}
+	
+	// 加权计算最终分数
+	finalScore := (requestScore * requestCountWeight) + (errorScore * errorRateWeight)
+	
+	// 为新账户（无历史记录）给予适度的优势，避免它们永远不被选择
+	if metrics.RequestCount == 0 {
+		finalScore += 10.0 // 新账户奖励分数
+	}
+	
+	return finalScore
+}
+
+// weightedRandomSelection 基于分数进行加权随机选择
+func (s *Service) weightedRandomSelection(accountScores []AccountScore) AccountScore {
+	if len(accountScores) == 1 {
+		return accountScores[0]
+	}
+	
+	// 计算总权重（使用指数函数增强高分账户的被选概率）
+	totalWeight := 0.0
+	weights := make([]float64, len(accountScores))
+	
+	for i, as := range accountScores {
+		// 使用指数函数增强差异，但避免过大的差距
+		weight := math.Exp(as.Score / 50.0) // 调整除数来控制选择的集中度
+		weights[i] = weight
+		totalWeight += weight
+	}
+	
+	// 生成随机数进行选择
+	r := rand.Float64() * totalWeight
+	currentWeight := 0.0
+	
+	for i, weight := range weights {
+		currentWeight += weight
+		if r <= currentWeight {
+			return accountScores[i]
+		}
+	}
+	
+	// 回退到最高分账户（不应该到这里）
+	return accountScores[0]
 }
 
 // handleResponse 处理响应
