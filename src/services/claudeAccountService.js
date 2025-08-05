@@ -512,8 +512,7 @@ class ClaudeAccountService {
         }
         
         return {
-          accountId: accountId,
-          poolId: null
+          accountId: accountId
         };
       }
       
@@ -522,14 +521,12 @@ class ClaudeAccountService {
         const boundAccount = await redis.getClaudeAccount(apiKeyData.claudeAccountId);
         if (boundAccount && boundAccount.isActive === 'true' && boundAccount.status !== 'error' && boundAccount.status !== 'banned') {
           logger.info(`🎯 Using bound dedicated account: ${boundAccount.name} (${apiKeyData.claudeAccountId}) for API key ${apiKeyData.name}`);
-          // 专属账户不属于任何池，poolId为null
           return {
-            accountId: apiKeyData.claudeAccountId,
-            poolId: null
+            accountId: apiKeyData.claudeAccountId
           };
         } else {
           const status = boundAccount ? boundAccount.status : 'not found';
-          logger.warn(`⚠️ Bound account ${apiKeyData.claudeAccountId} is not available (status: ${status}), falling back to shared pools`);
+          logger.warn(`⚠️ Bound account ${apiKeyData.claudeAccountId} is not available (status: ${status}), falling back to shared accounts`);
         }
       }
 
@@ -546,8 +543,7 @@ class ClaudeAccountService {
             if (!isRateLimited) {
               logger.info(`🎯 Using mapped account ${mappedAccountId} for session`);
               return {
-                accountId: mappedAccountId,
-                poolId: null
+                accountId: mappedAccountId
               };
             } else {
               logger.warn(`⚠️ Mapped account ${mappedAccountId} is rate limited, selecting new account`);
@@ -591,10 +587,8 @@ class ClaudeAccountService {
               await redis.deleteSessionAccountMapping(sessionHash);
             } else {
               logger.info(`🎯 Using sticky session shared account: ${mappedAccount.name} (${mappedAccountId}) for session ${sessionHash}`);
-              // 会话映射的账户不属于任何池
               return {
-                accountId: mappedAccountId,
-                poolId: null
+                accountId: mappedAccountId
               };
             }
           } else {
@@ -625,7 +619,7 @@ class ClaudeAccountService {
       
       // 如果没有非限流账户，则从限流账户中选择（按限流时间排序，最早限流的优先）
       if (candidateAccounts.length === 0) {
-        logger.warn('⚠️ All shared accounts are rate limited, selecting from rate limited pool');
+        logger.warn('⚠️ All shared accounts are rate limited, selecting from rate limited accounts');
         candidateAccounts = rateLimitedAccounts.sort((a, b) => {
           const aRateLimitedAt = new Date(a._rateLimitInfo.rateLimitedAt).getTime();
           const bRateLimitedAt = new Date(b._rateLimitInfo.rateLimitedAt).getTime();
@@ -653,10 +647,8 @@ class ClaudeAccountService {
       }
 
       logger.info(`🎯 Selected shared account: ${candidateAccounts[0].name} (${selectedAccountId}) for API key ${apiKeyData.name}`);
-      // 备用方案选择的账户不属于任何池
       return {
-        accountId: selectedAccountId,
-        poolId: null
+        accountId: selectedAccountId
       };
     } catch (error) {
       logger.error('❌ Failed to select account for API key:', error);

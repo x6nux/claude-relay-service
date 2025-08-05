@@ -66,7 +66,6 @@ class ClaudeRelayService {
     for (let retryCount = 0; retryCount < maxRetries; retryCount++) {
       let upstreamRequest = null;
       let accountId = null;
-      let poolId = null;
       
       try {
         // 调试日志：查看API Key数据
@@ -109,12 +108,10 @@ class ClaudeRelayService {
           if (retryCount === 0) {
             const selection = await claudeAccountService.selectAccountForApiKey(apiKeyData, sessionHash);
             accountId = selection.accountId;
-            poolId = selection.poolId;
           } else {
             // 重试时，需要选择不同的账户
             const selection = await claudeAccountService.selectAccountForApiKey(apiKeyData, null, usedAccountIds);
             accountId = selection.accountId;
-            poolId = selection.poolId;
             logger.info(`🔄 Retry ${retryCount}/${maxRetries - 1}: Switching to new account ${accountId}`);
           }
         } catch (accountError) {
@@ -218,12 +215,6 @@ class ClaudeRelayService {
             await accountRecoveryService.recordAccountFailure(accountId, new Error('HTTP 429 Rate limit'));
           }
           lastResponse = response;
-        // 确保响应包含 accountId 和 poolId
-        lastResponse.accountId = accountId;
-        lastResponse.poolId = poolId;
-          // 确保响应包含 accountId 和 poolId
-          lastResponse.accountId = accountId;
-          lastResponse.poolId = poolId;
           
           // 如果还有重试次数，继续下一次重试
           if (retryCount < maxRetries - 1) {
@@ -292,12 +283,6 @@ class ClaudeRelayService {
               await accountRecoveryService.recordAccountFailure(accountId, new Error('Organization disabled'));
             }
             lastResponse = response;
-        // 确保响应包含 accountId 和 poolId
-        lastResponse.accountId = accountId;
-        lastResponse.poolId = poolId;
-          // 确保响应包含 accountId 和 poolId
-          lastResponse.accountId = accountId;
-          lastResponse.poolId = poolId;
             
             // 如果还有重试次数，切换账号继续重试
             if (retryCount < maxRetries - 1) {
@@ -314,12 +299,6 @@ class ClaudeRelayService {
               await accountRecoveryService.recordAccountFailure(accountId, new Error('OAuth token revoked'));
             }
             lastResponse = response;
-        // 确保响应包含 accountId 和 poolId
-        lastResponse.accountId = accountId;
-        lastResponse.poolId = poolId;
-          // 确保响应包含 accountId 和 poolId
-          lastResponse.accountId = accountId;
-          lastResponse.poolId = poolId;
             
             // 如果还有重试次数，切换账号继续重试
             if (retryCount < maxRetries - 1) {
@@ -336,12 +315,6 @@ class ClaudeRelayService {
               await accountRecoveryService.recordAccountFailure(accountId, new Error('Rate limit exceeded'));
             }
             lastResponse = response;
-        // 确保响应包含 accountId 和 poolId
-        lastResponse.accountId = accountId;
-        lastResponse.poolId = poolId;
-          // 确保响应包含 accountId 和 poolId
-          lastResponse.accountId = accountId;
-          lastResponse.poolId = poolId;
             
             // 如果还有重试次数，继续下一次重试
             if (retryCount < maxRetries - 1) {
@@ -380,17 +353,13 @@ class ClaudeRelayService {
           await circuitBreakerService.recordSuccess(accountId);
           await accountRecoveryService.recordAccountSuccess(accountId);
           
-          // 在响应中添加accountId和poolId，以便调用方记录账户级别和共享池统计
+          // 在响应中添加accountId，以便调用方记录账户级别统计
           response.accountId = accountId;
-          response.poolId = poolId;
           return response;
         }
         
         // 其他错误，直接返回
         lastResponse = response;
-        // 确保响应包含 accountId 和 poolId
-        lastResponse.accountId = accountId;
-        lastResponse.poolId = poolId;
         break;
         
       } catch (error) {
@@ -843,11 +812,10 @@ class ClaudeRelayService {
       const sessionHash = sessionHelper.generateSessionHash(requestBody);
       
       // 选择可用的Claude账户（支持专属绑定和sticky会话）
-      let accountId, poolId;
+      let accountId;
       try {
         const selection = await claudeAccountService.selectAccountForApiKey(apiKeyData, sessionHash);
         accountId = selection.accountId;
-        poolId = selection.poolId;
       } catch (accountError) {
         logger.error(`❌ [Stream] Failed to select account: ${accountError.message}`);
         
@@ -895,8 +863,8 @@ class ClaudeRelayService {
       
       // 发送流式请求并捕获usage数据
       return await this._makeClaudeStreamRequestWithUsageCapture(processedBody, accessToken, proxyAgent, clientHeaders, responseStream, (usageData) => {
-        // 在usageCallback中添加accountId和poolId
-        usageCallback({ ...usageData, accountId, poolId });
+        // 在usageCallback中添加accountId
+        usageCallback({ ...usageData, accountId });
       }, accountId, sessionHash, streamTransformer, options);
     } catch (error) {
       logger.error('❌ Claude stream relay with usage capture failed:', error);
