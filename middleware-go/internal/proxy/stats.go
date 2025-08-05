@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"html/template"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -403,13 +404,24 @@ func (h *StatsHandler) GetStatsPage(c *gin.Context) {
 		
 		// 格式化时间
 		if metrics.LastUpdated > 0 {
-			display.LastUpdatedFormatted = time.Unix(metrics.LastUpdated/1000, 0).Format("2006-01-02 15:04:05")
+			// LastUpdated 是毫秒时间戳，转换为秒
+			display.LastUpdatedFormatted = time.Unix(metrics.LastUpdated/1000, 0).Format("01-02 15:04:05")
 		} else {
-			display.LastUpdatedFormatted = "N/A"
+			display.LastUpdatedFormatted = "未更新"
 		}
 		
 		accountStatsList = append(accountStatsList, display)
 	}
+	
+	// 对账户列表进行排序：MAX账户优先，然后按评分降序
+	sort.Slice(accountStatsList, func(i, j int) bool {
+		// MAX账户优先
+		if accountStatsList[i].IsMAX != accountStatsList[j].IsMAX {
+			return accountStatsList[i].IsMAX
+		}
+		// 然后按评分降序
+		return accountStatsList[i].Score > accountStatsList[j].Score
+	})
 	
 	// 计算总体错误率
 	var overallErrorRate float64

@@ -200,7 +200,7 @@
         .badge-max {
             background: #fef3c7;
             color: #92400e;
-            margin-right: 8px;
+            margin-left: 8px;
         }
         
         .score-bar {
@@ -394,8 +394,8 @@
                     {{range .Accounts}}
                     <tr>
                         <td>
-                            {{if .IsMAX}}<span class="badge badge-max">MAX</span>{{end}}
                             <span class="account-id">{{.AccountID}}</span>
+                            {{if .IsMAX}}<span class="badge badge-max">MAX</span>{{end}}
                         </td>
                         <td>
                             <span class="badge {{if .IsActive}}badge-active{{else}}badge-inactive{{end}}">
