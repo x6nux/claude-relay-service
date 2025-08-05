@@ -15,7 +15,6 @@ import (
 	"claude-middleware/internal/config"
 	"claude-middleware/internal/redis"
 	"github.com/gin-gonic/gin"
-	"github.com/gophertool/tool/log"
 )
 
 type Service struct {
@@ -33,7 +32,7 @@ type Service struct {
 func NewService(redisClient *redis.Client, cfg *config.Config) *Service {
 	targetURL, err := url.Parse(cfg.Proxy.TargetURL)
 	if err != nil {
-		log.Errorf("Invalid target URL: %v", err)
+		fmt.Printf("[ERROR] Invalid target URL: %v\n", err)
 		os.Exit(1)
 	}
 	
@@ -55,7 +54,7 @@ func NewService(redisClient *redis.Client, cfg *config.Config) *Service {
 func (s *Service) ProxyHandler(c *gin.Context) {
 	// 记录请求路径
 	requestPath := c.Request.URL.Path
-	log.Debugf("Processing request: %s %s", c.Request.Method, requestPath)
+	fmt.Printf("[DEBUG] Processing request: %s %s\n", c.Request.Method, requestPath)
 	
 	// 读取请求体
 	bodyBytes, err := io.ReadAll(c.Request.Body)
@@ -76,7 +75,7 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 		// 选择可用的Claude账户ID，排除已使用的账户
 		accountID, err := s.selectAvailableAccountWithExclusions(usedAccountIDs, bodyBytes, requestPath)
 		if err != nil {
-			log.Warnf("Failed to select account for %s (retry %d/%d): %v", requestPath, retryCount+1, maxRetries, err)
+			fmt.Printf("[WARN] Failed to select account for %s (retry %d/%d): %v\n", requestPath, retryCount+1, maxRetries, err)
 			
 			// 如果是最后一次重试，返回错误
 			if retryCount == maxRetries-1 {
@@ -91,15 +90,15 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 		usedAccountIDs[accountID] = true
 		
 		if retryCount > 0 {
-			log.Infof("🔄 Retry %d/%d: Using account %s for %s", retryCount+1, maxRetries, accountID, requestPath)
+			fmt.Printf("[INFO] 🔄 Retry %d/%d: Using account %s for %s\n", retryCount+1, maxRetries, accountID, requestPath)
 		} else {
-			log.Infof("Selected account %s for %s", accountID, requestPath)
+			fmt.Printf("[INFO] Selected account %s for %s\n", accountID, requestPath)
 		}
 		
 		// 获取账户详细信息并存储到context
 		accounts, err := s.redisClient.GetAllActiveAccounts()
 		if err != nil {
-			log.Warnf("Failed to get account details: %v", err)
+			fmt.Printf("[WARN] Failed to get account details: %v\n", err)
 			if retryCount == maxRetries-1 {
 				c.JSON(http.StatusInternalServerError, gin.H{
 					"error": "Failed to retrieve account information"})
@@ -117,7 +116,7 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 		}
 		
 		if selectedAccount == nil {
-			log.Warnf("Account %s not found in active accounts", accountID)
+			fmt.Printf("[WARN] Account %s not found in active accounts\n", accountID)
 			if retryCount == maxRetries-1 {
 				c.JSON(http.StatusInternalServerError, gin.H{
 					"error": "Selected account not found"})
@@ -139,7 +138,7 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 	}
 	
 	// 所有重试都失败了
-	log.Errorf("❌ All %d retries exhausted for %s", maxRetries, requestPath)
+	fmt.Printf("[ERROR] ❌ All %d retries exhausted for %s\n", maxRetries, requestPath)
 	c.JSON(http.StatusBadGateway, gin.H{
 		"error": "All retry attempts failed"})
 }
@@ -154,7 +153,7 @@ func (s *Service) attemptRequest(c *gin.Context, accountID string, bodyBytes []b
 	// 创建新的请求
 	proxyReq, err := http.NewRequest(c.Request.Method, targetURL.String(), bytes.NewReader(bodyBytes))
 	if err != nil {
-		log.Warnf("Failed to create proxy request: %v", err)
+		fmt.Printf("[WARN] Failed to create proxy request: %v\n", err)
 		return false
 	}
 	
@@ -182,7 +181,7 @@ func (s *Service) attemptRequest(c *gin.Context, accountID string, bodyBytes []b
 	// 发送请求
 	resp, err := s.httpClient.Do(proxyReq)
 	if err != nil {
-		log.Warnf("Proxy request failed for account %s on %s (retry %d/%d): %v", accountID, requestPath, retryCount+1, maxRetries, err)
+		fmt.Printf("[WARN] Proxy request failed for account %s on %s (retry %d/%d): %v\n", accountID, requestPath, retryCount+1, maxRetries, err)
 		
 		// 标记账户为有问题的账户
 		s.markAccountAsProblematic(accountID, "network_error")
@@ -191,7 +190,7 @@ func (s *Service) attemptRequest(c *gin.Context, accountID string, bodyBytes []b
 	
 	// 检查响应状态码
 	if !s.isSuccessResponse(resp.StatusCode) {
-		log.Warnf("Account %s returned error status %d on %s (retry %d/%d)", accountID, resp.StatusCode, requestPath, retryCount+1, maxRetries)
+		fmt.Printf("[WARN] Account %s returned error status %d on %s (retry %d/%d)\n", accountID, resp.StatusCode, requestPath, retryCount+1, maxRetries)
 		
 		// 对于某些错误状态码，标记账户为有问题
 		if s.shouldMarkAccountAsProblematic(resp.StatusCode) {
@@ -232,10 +231,10 @@ func (s *Service) selectAvailableAccountWithExclusions(excludeAccountIDs map[str
 	model := detector.ExtractModelFromRequest(requestBody, requestPath)
 	requiresMAX := detector.RequiresMAXAccount(model)
 	
-	log.Debugf("🔍 Model detected: '%s', requires MAX account: %v", model, requiresMAX)
+	fmt.Printf("[DEBUG] 🔍 Model detected: '%s', requires MAX account: %v\n", model, requiresMAX)
 	
 	excludeCount := len(excludeAccountIDs)
-	log.Debugf("🔍 Searching for account (excluding %d accounts), total accounts: %d", excludeCount, len(accounts))
+	fmt.Printf("[DEBUG] 🔍 Searching for account (excluding %d accounts), total accounts: %d\n", excludeCount, len(accounts))
 	
 	// 过滤掉被排除的账户、限流账户和有问题的账户
 	var availableAccounts []redis.ClaudeAccount
@@ -249,7 +248,7 @@ func (s *Service) selectAvailableAccountWithExclusions(excludeAccountIDs map[str
 	
 	for _, account := range accounts {
 		if excludeAccountIDs[account.ID] {
-			log.Debugf("   ⏭️  Skipping excluded account: %s", account.ID)
+			fmt.Printf("[DEBUG]    ⏭️  Skipping excluded account: %s\n", account.ID)
 			continue
 		}
 		
@@ -262,23 +261,23 @@ func (s *Service) selectAvailableAccountWithExclusions(excludeAccountIDs map[str
 			if account.IsMAX {
 				maxProblematicAccounts = append(maxProblematicAccounts, account)
 			}
-			log.Debugf("   ❌ Account %s is problematic (MAX: %v)", account.ID, account.IsMAX)
+			fmt.Printf("[DEBUG]    ❌ Account %s is problematic (MAX: %v)\n", account.ID, account.IsMAX)
 		} else if isRateLimited {
 			rateLimitedAccounts = append(rateLimitedAccounts, account)
 			if account.IsMAX {
 				maxRateLimitedAccounts = append(maxRateLimitedAccounts, account)
 			}
-			log.Debugf("   ⏱️  Account %s is rate limited (MAX: %v)", account.ID, account.IsMAX)
+			fmt.Printf("[DEBUG]    ⏱️  Account %s is rate limited (MAX: %v)\n", account.ID, account.IsMAX)
 		} else {
 			availableAccounts = append(availableAccounts, account)
 			if account.IsMAX {
 				maxAvailableAccounts = append(maxAvailableAccounts, account)
 			}
-			log.Debugf("   ✅ Account %s is available (MAX: %v)", account.ID, account.IsMAX)
+			fmt.Printf("[DEBUG]    ✅ Account %s is available (MAX: %v)\n", account.ID, account.IsMAX)
 		}
 	}
 	
-	log.Debugf("📊 Account status: %d available (%d MAX), %d rate-limited (%d MAX), %d problematic (%d MAX)", 
+	fmt.Printf("[DEBUG] 📊 Account status: %d available (%d MAX), %d rate-limited (%d MAX), %d problematic (%d MAX)\n", 
 		len(availableAccounts), len(maxAvailableAccounts),
 		len(rateLimitedAccounts), len(maxRateLimitedAccounts),
 		len(problematicAccounts), len(maxProblematicAccounts))
@@ -290,16 +289,16 @@ func (s *Service) selectAvailableAccountWithExclusions(excludeAccountIDs map[str
 		// 对于 claude-opus-4-20250514 模型，优先使用 MAX 账号
 		if len(maxAvailableAccounts) > 0 {
 			selectedAccounts = maxAvailableAccounts
-			log.Info("🎯 Using MAX available accounts for Opus model")
+			fmt.Println("[INFO] 🎯 Using MAX available accounts for Opus model")
 		} else if len(maxRateLimitedAccounts) > 0 {
 			selectedAccounts = maxRateLimitedAccounts
-			log.Warn("⚠️ Using MAX rate-limited accounts for Opus model (no available MAX accounts)")
+			fmt.Println("[WARN] ⚠️ Using MAX rate-limited accounts for Opus model (no available MAX accounts)")
 		} else if len(maxProblematicAccounts) > 0 {
 			selectedAccounts = maxProblematicAccounts
-			log.Warn("⚠️ Using MAX problematic accounts for Opus model (no other MAX accounts)")
+			fmt.Println("[WARN] ⚠️ Using MAX problematic accounts for Opus model (no other MAX accounts)")
 		} else {
 			// 如果没有 MAX 账号，记录警告但继续使用普通账号
-			log.Warn("⚠️ No MAX accounts found for Opus model, falling back to regular accounts")
+			fmt.Println("[WARN] ⚠️ No MAX accounts found for Opus model, falling back to regular accounts")
 			if len(availableAccounts) > 0 {
 				selectedAccounts = availableAccounts
 			} else if len(rateLimitedAccounts) > 0 {
@@ -312,13 +311,13 @@ func (s *Service) selectAvailableAccountWithExclusions(excludeAccountIDs map[str
 		// 对于其他模型，使用所有类型的账号（优先非 MAX 账号以节省资源）
 		if len(availableAccounts) > 0 {
 			selectedAccounts = availableAccounts
-			log.Debug("🎯 Using all available accounts for regular model")
+			fmt.Println("[DEBUG] 🎯 Using all available accounts for regular model")
 		} else if len(rateLimitedAccounts) > 0 {
 			selectedAccounts = rateLimitedAccounts
-			log.Warn("⚠️ Using rate-limited accounts (no available accounts)")
+			fmt.Println("[WARN] ⚠️ Using rate-limited accounts (no available accounts)")
 		} else {
 			selectedAccounts = problematicAccounts
-			log.Warn("⚠️ Using problematic accounts (no other accounts)")
+			fmt.Println("[WARN] ⚠️ Using problematic accounts (no other accounts)")
 		}
 	}
 	
@@ -335,7 +334,7 @@ func (s *Service) selectAvailableAccountWithExclusions(excludeAccountIDs map[str
 		accountType = "MAX"
 	}
 	
-	log.Infof("✅ Selected %s account: %s (%s)", accountType, selected.ID, selected.Name)
+	fmt.Printf("[INFO] ✅ Selected %s account: %s (%s)\n", accountType, selected.ID, selected.Name)
 	return selected.ID, nil
 }
 
@@ -346,13 +345,13 @@ func (s *Service) handleResponse(c *gin.Context, resp *http.Response, accountID 
 	// 检查是否是限流响应
 	switch resp.StatusCode {
 	case 429:
-		log.Warnf("Account %s is rate limited on %s", accountID, requestPath)
+		fmt.Printf("[WARN] Account %s is rate limited on %s\n", accountID, requestPath)
 		s.markAccountRateLimited(accountID)
 	case 200, 201:
 		// 记录成功，但不更新Redis
-		log.Infof("Successfully processed %s with account %s", requestPath, accountID)
+		fmt.Printf("[INFO] Successfully processed %s with account %s\n", requestPath, accountID)
 	default:
-		log.Debugf("Response %d for %s with account %s", resp.StatusCode, requestPath, accountID)
+		fmt.Printf("[DEBUG] Response %d for %s with account %s\n", resp.StatusCode, requestPath, accountID)
 	}
 	
 	// 复制响应头
@@ -367,7 +366,7 @@ func (s *Service) handleResponse(c *gin.Context, resp *http.Response, accountID 
 	
 	// 复制响应体
 	if _, err := io.Copy(c.Writer, resp.Body); err != nil {
-		log.Warnf("Failed to copy response body for %s: %v", requestPath, err)
+		fmt.Printf("[WARN] Failed to copy response body for %s: %v\n", requestPath, err)
 	}
 }
 
@@ -408,7 +407,7 @@ func (s *Service) markAccountAsProblematic(accountID string, reason string) {
 	s.problematicCache[accountID] = now.Add(disableDuration)
 	s.rateLimitMutex.Unlock()
 	
-	log.Warnf("🚫 Marked account %s as problematic (reason: %s, duration: %v)", accountID, reason, disableDuration)
+	fmt.Printf("[WARN] 🚫 Marked account %s as problematic (reason: %s, duration: %v)\n", accountID, reason, disableDuration)
 }
 
 // isAccountProblematic 检查账户是否被标记为有问题（仅内存）
@@ -476,6 +475,6 @@ func (s *Service) markAccountRateLimited(accountID string) {
 	s.rateLimitedCache[accountID] = now
 	s.rateLimitMutex.Unlock()
 	
-	log.Warnf("🚫 Account marked as rate limited for 5 minutes: %s", accountID)
+	fmt.Printf("[WARN] 🚫 Account marked as rate limited for 5 minutes: %s\n", accountID)
 }
 

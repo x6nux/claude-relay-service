@@ -4,7 +4,6 @@ go 1.24.4
 
 require (
 	github.com/gin-gonic/gin v1.9.1
-	github.com/gophertool/tool v0.0.8-20250724
 	github.com/redis/go-redis/v9 v9.3.0
 )
 

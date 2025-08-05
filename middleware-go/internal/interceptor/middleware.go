@@ -3,12 +3,12 @@ package interceptor
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gophertool/tool/log"
 )
 
 // RequestData 请求数据结构
@@ -134,7 +134,7 @@ func (ri *RequestInterceptor) Middleware() gin.HandlerFunc {
 		// 构建请求数据
 		requestData, err := ri.buildRequestData(c)
 		if err != nil {
-			log.Errorf("Failed to build request data: %v", err)
+		fmt.Printf("[ERROR] Failed to build request data: %v\n", err)
 			c.Next()
 			return
 		}
@@ -149,7 +149,7 @@ func (ri *RequestInterceptor) Middleware() gin.HandlerFunc {
 		allowed := ri.executeFilters(interceptorCtx)
 
 		if !allowed {
-			log.Warnf("Request blocked by interceptor: %s %s from %s",
+			fmt.Printf("[WARN] Request blocked by interceptor: %s %s from %s\n",
 				requestData.Method, requestData.Path, requestData.ClientIP)
 
 			c.JSON(http.StatusForbidden, gin.H{
@@ -197,7 +197,7 @@ func (ri *RequestInterceptor) Middleware() gin.HandlerFunc {
 		interceptorCtx.Response = responseData
 
 		// 记录处理完成的日志
-		log.Debugf("Request processed: %s %s - %d - %v",
+		fmt.Printf("[DEBUG] Request processed: %s %s - %d - %v\n",
 			requestData.Method, requestData.Path,
 			responseData.StatusCode, interceptorCtx.Duration)
 	}
@@ -214,7 +214,7 @@ func (ri *RequestInterceptor) executeFilters(ctx *InterceptorContext) bool {
 	for i, filterFunc := range ri.filterFuncs {
 		allowed := filterFunc(ctx)
 		if !allowed {
-			log.Debugf("Request blocked by filter #%d", i+1)
+			fmt.Printf("[DEBUG] Request blocked by filter #%d\n", i+1)
 			return false
 		}
 	}

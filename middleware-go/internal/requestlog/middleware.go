@@ -13,7 +13,6 @@ import (
 	"claude-middleware/internal/config"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gophertool/tool/log"
 )
 
 // RequestLogData 请求日志数据结构
@@ -122,7 +121,7 @@ func (rl *RequestLogger) Middleware() gin.HandlerFunc {
 			// 成功发送到通道
 		default:
 			// 通道满了，丢弃此日志条目（避免阻塞请求）
-			log.Warn("Request log channel is full, dropping log entry")
+			fmt.Println("[WARN]","Request log channel is full, dropping log entry")
 		}
 
 		c.Next()
@@ -178,7 +177,7 @@ func (rl *RequestLogger) logWriter() {
 		for filepath, logs := range buffer {
 			if len(logs) > 0 {
 				if err := rl.batchWriteToFile(filepath, logs); err != nil {
-					log.Errorf("Failed to write batch logs to %s: %v", filepath, err)
+					fmt.Printf("[ERROR] Failed to write batch logs to %s: %v\n", filepath, err)
 				}
 			}
 		}
@@ -193,7 +192,7 @@ func (rl *RequestLogger) logWriter() {
 		case logData := <-rl.logChan:
 			// 确保日志目录存在
 			if err := os.MkdirAll(rl.config.LogDir, 0755); err != nil {
-				log.Errorf("Failed to create log directory: %v", err)
+				fmt.Printf("[ERROR] Failed to create log directory: %v\n", err)
 				continue
 			}
 
@@ -207,7 +206,7 @@ func (rl *RequestLogger) logWriter() {
 			// 如果缓冲区达到一定大小，立即写入
 			if len(buffer[filepath]) >= 50 { // 每50条记录写入一次
 				if err := rl.batchWriteToFile(filepath, buffer[filepath]); err != nil {
-					log.Errorf("Failed to write batch logs to %s: %v", filepath, err)
+					fmt.Printf("[ERROR] Failed to write batch logs to %s: %v\n", filepath, err)
 				}
 				delete(buffer, filepath)
 			}
@@ -242,7 +241,7 @@ func (rl *RequestLogger) batchWriteToFile(filepath string, newLogs []RequestLogD
 	var existingLogs []RequestLogData
 	if content, err := os.ReadFile(filepath); err == nil {
 		if err := json.Unmarshal(content, &existingLogs); err != nil {
-			log.Warnf("Failed to parse existing log file %s: %v", filepath, err)
+			fmt.Printf("[WARN] Failed to parse existing log file %s: %v\n", filepath, err)
 			existingLogs = []RequestLogData{}
 		}
 	}
@@ -266,7 +265,7 @@ func (rl *RequestLogger) batchWriteToFile(filepath string, newLogs []RequestLogD
 	}
 
 	filename := filepath[strings.LastIndex(filepath, "/")+1:]
-	log.Debugf("Batch wrote %d logs to: %s (total: %d records)", len(newLogs), filename, len(allLogs))
+	fmt.Printf("[DEBUG] Batch wrote %d logs to: %s (total: %d records)\n", len(newLogs), filename, len(allLogs))
 	return nil
 }
 
@@ -305,16 +304,16 @@ func (rl *RequestLogger) Cleanup() error {
 		if info.ModTime().Before(cutoffDate) {
 			filepath := filepath.Join(rl.config.LogDir, name)
 			if err := os.Remove(filepath); err != nil {
-				log.Warnf("Failed to delete old log file %s: %v", name, err)
+				fmt.Printf("[WARN] Failed to delete old log file %s: %v\n", name, err)
 			} else {
 				deletedCount++
-				log.Debugf("Deleted old request log: %s", name)
+				fmt.Printf("[DEBUG] Deleted old request log: %s\n", name)
 			}
 		}
 	}
 
 	if deletedCount > 0 {
-		log.Infof("Cleaned up %d old request log files", deletedCount)
+		fmt.Printf("[INFO] Cleaned up %d old request log files\n", deletedCount)
 	}
 
 	return nil

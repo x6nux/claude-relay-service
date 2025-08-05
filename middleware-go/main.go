@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,7 +19,6 @@ import (
 	"claude-middleware/internal/requestlog"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gophertool/tool/log"
 )
 
 func main() {
@@ -28,55 +28,46 @@ func main() {
 		level = "info"
 	}
 
-	switch level {
-	case "debug":
-		log.SetLevel(log.DEBUG)
-	case "info":
-		log.SetLevel(log.INFO)
-	case "warn", "warning":
-		log.SetLevel(log.WARN)
-	case "error":
-		log.SetLevel(log.ERROR)
-	default:
-		log.SetLevel(log.INFO)
-	}
+	fmt.Printf("[INFO] Log level set to: %s\n", level)
 
 	// 初始化配置
 	cfg := config.Load()
 
 	// 打印环境变量配置状态
-	log.Info("========================================")
-	log.Info("Claude Middleware Configuration Status")
-	log.Info("========================================")
-	log.Infof("Server Port: %d", cfg.Server.Port)
-	log.Infof("Server Mode: %s", cfg.Server.Mode)
-	log.Debugf("Redis Host: %s", cfg.Redis.Host)
-	log.Debugf("Redis Port: %d", cfg.Redis.Port)
-	log.Debugf("Redis DB: %d", cfg.Redis.DB)
-	log.Debugf("Redis Password: %s", func() string {
-		if cfg.Redis.Password == "" {
-			return "(not set)"
-		}
-		return "****"
-	}())
-	log.Infof("Target URL: %s", cfg.Proxy.TargetURL)
-	log.Infof("Proxy Timeout: %d seconds", cfg.Proxy.Timeout)
-	log.Infof("Request Logging: %v", cfg.RequestLog.Enabled)
-	if cfg.RequestLog.Enabled {
-		log.Infof("Log Directory: %s", cfg.RequestLog.LogDir)
-		log.Infof("Max Records per File: %d", cfg.RequestLog.MaxRecordsPerFile)
-		log.Infof("Retention Days: %d", cfg.RequestLog.RetentionDays)
+	fmt.Println("========================================")
+	fmt.Println("Claude Middleware Configuration Status")
+	fmt.Println("========================================")
+	fmt.Printf("Server Port: %d\n", cfg.Server.Port)
+	fmt.Printf("Server Mode: %s\n", cfg.Server.Mode)
+	if level == "debug" {
+		fmt.Printf("Redis Host: %s\n", cfg.Redis.Host)
+		fmt.Printf("Redis Port: %d\n", cfg.Redis.Port)
+		fmt.Printf("Redis DB: %d\n", cfg.Redis.DB)
+		fmt.Printf("Redis Password: %s\n", func() string {
+			if cfg.Redis.Password == "" {
+				return "(not set)"
+			}
+			return "****"
+		}())
 	}
-	log.Info("========================================")
+	fmt.Printf("Target URL: %s\n", cfg.Proxy.TargetURL)
+	fmt.Printf("Proxy Timeout: %d seconds\n", cfg.Proxy.Timeout)
+	fmt.Printf("Request Logging: %v\n", cfg.RequestLog.Enabled)
+	if cfg.RequestLog.Enabled {
+		fmt.Printf("Log Directory: %s\n", cfg.RequestLog.LogDir)
+		fmt.Printf("Max Records per File: %d\n", cfg.RequestLog.MaxRecordsPerFile)
+		fmt.Printf("Retention Days: %d\n", cfg.RequestLog.RetentionDays)
+	}
+	fmt.Println("========================================")
 
 	// 初始化Redis连接
-	log.Info("Connecting to Redis...")
+	fmt.Println("Connecting to Redis...")
 	redisClient, err := redis.NewClient(cfg.Redis)
 	if err != nil {
-		log.Errorf("❌ Failed to connect to Redis: %v", err)
+		fmt.Printf("❌ Failed to connect to Redis: %v\n", err)
 		os.Exit(1)
 	}
-	log.Info("✅ Successfully connected to Redis")
+	fmt.Println("✅ Successfully connected to Redis")
 	defer redisClient.Close()
 
 	// 初始化代理服务
@@ -93,7 +84,7 @@ func main() {
 
 			for range ticker.C {
 				if err := requestLogger.Cleanup(); err != nil {
-					log.Errorf("Failed to cleanup old request logs: %v", err)
+					fmt.Printf("[ERROR] Failed to cleanup old request logs: %v\n", err)
 				}
 			}
 		}()
@@ -106,23 +97,25 @@ func main() {
 	requestInterceptor := interceptor.CreateRequestInterceptor()
 
 	// 打印认证配置状态
-	log.Debug("Authentication Configuration:")
-	log.Debugf("Auth Enabled: %v", authConfig.Enabled)
-	log.Debugf("API Key Prefix: %s", authConfig.Prefix)
+	if level == "debug" {
+		fmt.Println("Authentication Configuration:")
+		fmt.Printf("Auth Enabled: %v\n", authConfig.Enabled)
+		fmt.Printf("API Key Prefix: %s\n", authConfig.Prefix)
+	}
 	if authConfig.Enabled {
-		log.Infof("Configured API Keys: %d keys", len(authConfig.APIKeys))
-		if len(authConfig.APIKeys) > 0 {
+		fmt.Printf("Configured API Keys: %d keys\n", len(authConfig.APIKeys))
+		if len(authConfig.APIKeys) > 0 && level == "debug" {
 			// 只显示key的前后几个字符
 			for i, key := range authConfig.APIKeys {
 				if len(key) > 10 {
-					log.Debugf("  Key %d: %s...%s", i+1, key[:6], key[len(key)-4:])
+					fmt.Printf("  Key %d: %s...%s\n", i+1, key[:6], key[len(key)-4:])
 				} else {
-					log.Debugf("  Key %d: (too short to display)", i+1)
+					fmt.Printf("  Key %d: (too short to display)\n", i+1)
 				}
 			}
 		}
 	}
-	log.Info("========================================")
+	fmt.Println("========================================")
 
 	// 设置Gin模式
 	if cfg.Server.Mode == "production" {
@@ -144,19 +137,19 @@ func main() {
 	// 创建需要认证的路由组
 	api := r.Group("/")
 	if authConfig.Enabled {
-		log.Info("API Key authentication enabled")
+		fmt.Println("API Key authentication enabled")
 		api.Use(auth.AuthMiddleware(authConfig))
 	} else {
-		log.Warn("API Key authentication disabled")
+		fmt.Println("[WARN] API Key authentication disabled")
 	}
 
 	// 添加请求拦截器中间件（必须启用，在认证之前）
-	log.Info("Request interceptor middleware enabled")
+	fmt.Println("Request interceptor middleware enabled")
 	api.Use(requestInterceptor.Middleware())
 
 	// 添加请求日志中间件
 	if cfg.RequestLog.Enabled {
-		log.Info("Request logging middleware enabled")
+		fmt.Println("Request logging middleware enabled")
 		api.Use(requestLogger.Middleware())
 	}
 
@@ -174,16 +167,16 @@ func main() {
 
 	// 启动服务器
 	port := strconv.Itoa(cfg.Server.Port)
-	log.Info("========================================")
-	log.Infof("🚀 Claude Middleware starting on port %s", port)
-	log.Infof("🎯 Proxying requests to: %s", cfg.Proxy.TargetURL)
-	log.Infof("🔐 Authentication: %s", func() string {
+	fmt.Println("========================================")
+	fmt.Printf("🚀 Claude Middleware starting on port %s\n", port)
+	fmt.Printf("🎯 Proxying requests to: %s\n", cfg.Proxy.TargetURL)
+	fmt.Printf("🔐 Authentication: %s\n", func() string {
 		if authConfig.Enabled {
 			return "Enabled"
 		}
 		return "Disabled"
 	}())
-	log.Info("========================================")
+	fmt.Println("========================================")
 
 	// 创建HTTP服务器
 	srv := &http.Server{
@@ -194,7 +187,7 @@ func main() {
 	// 在后台启动服务器
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Errorf("Failed to start server: %v", err)
+			fmt.Printf("[ERROR] Failed to start server: %v\n", err)
 			os.Exit(1)
 		}
 	}()
@@ -204,11 +197,11 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Info("🛑 Shutting down server...")
+	fmt.Println("🛑 Shutting down server...")
 
 	// 停止请求日志记录器
 	if cfg.RequestLog.Enabled {
-		log.Info("Stopping request logger...")
+		fmt.Println("Stopping request logger...")
 		requestLogger.Stop()
 	}
 
@@ -217,8 +210,8 @@ func main() {
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Errorf("Server forced to shutdown: %v", err)
+		fmt.Printf("[ERROR] Server forced to shutdown: %v\n", err)
 	} else {
-		log.Info("✅ Server shutdown completed")
+		fmt.Println("✅ Server shutdown completed")
 	}
 }

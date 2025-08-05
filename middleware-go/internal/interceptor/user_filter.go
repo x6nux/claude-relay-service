@@ -2,9 +2,8 @@ package interceptor
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
-
-	"github.com/gophertool/tool/log"
 )
 
 // 模型配置常量
@@ -75,7 +74,7 @@ func UserFilter(ctx *InterceptorContext) bool {
 	body := &Body{}
 	err := json.Unmarshal(ctx.Request.Body, body)
 	if err != nil {
-		log.Errorf("Failed to unmarshal request body: %v", err)
+		fmt.Printf("[ERROR] Failed to unmarshal request body: %v\n", err)
 		return false
 	}
 	bodyStr := string(ctx.Request.Body)
@@ -116,7 +115,7 @@ func CreateRequestInterceptor() *RequestInterceptor {
 		WithFilter(UserFilter), // 添加用户自定义过滤函数
 	)
 
-	log.Infof("Request interceptor initialized with %d filter(s)", requestInterceptor.GetFilterCount())
+	fmt.Printf("[INFO] Request interceptor initialized with %d filter(s)\n", requestInterceptor.GetFilterCount())
 
 	return requestInterceptor
 }
