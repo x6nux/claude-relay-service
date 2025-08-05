@@ -136,17 +136,6 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 		if success {
 			return // 请求成功，结束重试
 		}
-		
-		// 如果是最后一次重试，不需要等待了
-		if retryCount < maxRetries-1 {
-			// 指数退避延迟
-			delay := time.Duration(1000*(1<<retryCount)) * time.Millisecond // 1s, 2s, 4s, 8s
-			if delay > 10*time.Second {
-				delay = 10 * time.Second
-			}
-			log.Infof("⏳ Waiting %v before retry...", delay)
-			time.Sleep(delay)
-		}
 	}
 	
 	// 所有重试都失败了
