@@ -11,7 +11,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"claude-middleware/internal/config"
@@ -24,11 +23,6 @@ type Service struct {
 	config      *config.Config
 	targetURL   *url.URL
 	httpClient  *http.Client
-	
-	// 账户状态标记（仅内存，不写入Redis）
-	rateLimitedCache  map[string]time.Time  // accountID -> 限流结束时间
-	problematicCache  map[string]time.Time  // accountID -> 问题恢复时间
-	rateLimitMutex    sync.RWMutex
 }
 
 func NewService(redisClient *redis.Client, cfg *config.Config) *Service {
@@ -39,11 +33,9 @@ func NewService(redisClient *redis.Client, cfg *config.Config) *Service {
 	}
 	
 	service := &Service{
-		redisClient:      redisClient,
-		config:          cfg,
-		targetURL:       targetURL,
-		rateLimitedCache: make(map[string]time.Time),
-		problematicCache: make(map[string]time.Time),
+		redisClient: redisClient,
+		config:      cfg,
+		targetURL:   targetURL,
 		httpClient: &http.Client{
 			Timeout: time.Duration(cfg.Proxy.Timeout) * time.Second,
 		},
@@ -561,10 +553,8 @@ func (s *Service) shouldMarkAccountAsProblematic(statusCode int) bool {
 	}
 }
 
-// markAccountAsProblematic 标记账户为有问题的账户（仅内存）
+// markAccountAsProblematic 标记账户为有问题的账户（使用Redis）
 func (s *Service) markAccountAsProblematic(accountID string, reason string) {
-	now := time.Now()
-	
 	// 所有异常统一限流5分钟
 	disableDuration := 5 * time.Minute
 	
@@ -573,32 +563,22 @@ func (s *Service) markAccountAsProblematic(accountID string, reason string) {
 		s.markAccountRateLimited(accountID)
 	}
 	
-	s.rateLimitMutex.Lock()
-	s.problematicCache[accountID] = now.Add(disableDuration)
-	s.rateLimitMutex.Unlock()
+	if err := s.redisClient.SetAccountProblematic(accountID, disableDuration); err != nil {
+		fmt.Printf("[ERROR] Failed to mark account %s as problematic in Redis: %v\n", accountID, err)
+		return
+	}
 	
 	fmt.Printf("[WARN] 🚫 Marked account %s as problematic (reason: %s, duration: %v)\n", accountID, reason, disableDuration)
 }
 
-// isAccountProblematic 检查账户是否被标记为有问题（仅内存）
+// isAccountProblematic 检查账户是否被标记为有问题（使用Redis）
 func (s *Service) isAccountProblematic(accountID string) bool {
-	s.rateLimitMutex.RLock()
-	disabledUntil, exists := s.problematicCache[accountID]
-	s.rateLimitMutex.RUnlock()
-	
-	if !exists {
+	isProblematic, err := s.redisClient.IsAccountProblematic(accountID)
+	if err != nil {
+		fmt.Printf("[ERROR] Failed to check account problematic status for %s: %v\n", accountID, err)
 		return false
 	}
-	
-	if time.Now().After(disabledUntil) {
-		// 禁用期已过，移除标记
-		s.rateLimitMutex.Lock()
-		delete(s.problematicCache, accountID)
-		s.rateLimitMutex.Unlock()
-		return false
-	}
-	
-	return true
+	return isProblematic
 }
 // selectAvailableAccount 选择可用的账户（兼容性函数）
 func (s *Service) selectAvailableAccount(requestBody []byte, requestPath string) (string, error) {
@@ -614,36 +594,25 @@ func (s *Service) selectAvailableAccountExcluding(excludeAccountID string, reque
 	return s.selectAvailableAccountWithExclusions(excludeMap, requestBody, requestPath)
 }
 
-// isAccountRateLimited 检查账户是否被限流（仅内存）
+// isAccountRateLimited 检查账户是否被限流（使用Redis）
 func (s *Service) isAccountRateLimited(accountID string) bool {
-	s.rateLimitMutex.RLock()
-	rateLimitedAt, exists := s.rateLimitedCache[accountID]
-	s.rateLimitMutex.RUnlock()
-	
-	if !exists {
+	isRateLimited, err := s.redisClient.IsAccountRateLimited(accountID)
+	if err != nil {
+		fmt.Printf("[ERROR] Failed to check account rate limit status for %s: %v\n", accountID, err)
 		return false
 	}
-	
-	// 限流5分钟
-	if time.Since(rateLimitedAt) > 5*time.Minute {
-		// 自动移除过期的限流状态
-		s.rateLimitMutex.Lock()
-		delete(s.rateLimitedCache, accountID)
-		s.rateLimitMutex.Unlock()
-		
-		return false
-	}
-	
-	return true
+	return isRateLimited
 }
 
-// markAccountRateLimited 标记账户为限流状态（仅内存）
+// markAccountRateLimited 标记账户为限流状态（使用Redis）
 func (s *Service) markAccountRateLimited(accountID string) {
-	now := time.Now()
+	// 限流5分钟
+	duration := 5 * time.Minute
 	
-	s.rateLimitMutex.Lock()
-	s.rateLimitedCache[accountID] = now
-	s.rateLimitMutex.Unlock()
+	if err := s.redisClient.SetAccountRateLimit(accountID, duration); err != nil {
+		fmt.Printf("[ERROR] Failed to mark account %s as rate limited in Redis: %v\n", accountID, err)
+		return
+	}
 	
 	fmt.Printf("[WARN] 🚫 Account marked as rate limited for 5 minutes: %s\n", accountID)
 }

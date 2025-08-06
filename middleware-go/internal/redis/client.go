@@ -264,3 +264,41 @@ func (c *Client) GetAllAccountMetrics() (map[string]*AccountMetrics, error) {
 func (c *Client) DeleteKey(key string) error {
 	return c.client.Del(c.ctx, key).Err()
 }
+
+// SetAccountRateLimit 设置账户限流状态，带过期时间
+func (c *Client) SetAccountRateLimit(accountID string, duration time.Duration) error {
+	key := fmt.Sprintf("middleware:ratelimit:%s", accountID)
+	return c.client.SetEx(c.ctx, key, "limited", duration).Err()
+}
+
+// IsAccountRateLimited 检查账户是否被限流
+func (c *Client) IsAccountRateLimited(accountID string) (bool, error) {
+	key := fmt.Sprintf("middleware:ratelimit:%s", accountID)
+	exists, err := c.client.Exists(c.ctx, key).Result()
+	return exists > 0, err
+}
+
+// ClearAccountRateLimit 清除账户限流状态
+func (c *Client) ClearAccountRateLimit(accountID string) error {
+	key := fmt.Sprintf("middleware:ratelimit:%s", accountID)
+	return c.client.Del(c.ctx, key).Err()
+}
+
+// SetAccountProblematic 设置账户问题状态，带过期时间
+func (c *Client) SetAccountProblematic(accountID string, duration time.Duration) error {
+	key := fmt.Sprintf("middleware:problematic:%s", accountID)
+	return c.client.SetEx(c.ctx, key, "problematic", duration).Err()
+}
+
+// IsAccountProblematic 检查账户是否有问题
+func (c *Client) IsAccountProblematic(accountID string) (bool, error) {
+	key := fmt.Sprintf("middleware:problematic:%s", accountID)
+	exists, err := c.client.Exists(c.ctx, key).Result()
+	return exists > 0, err
+}
+
+// ClearAccountProblematic 清除账户问题状态
+func (c *Client) ClearAccountProblematic(accountID string) error {
+	key := fmt.Sprintf("middleware:problematic:%s", accountID)
+	return c.client.Del(c.ctx, key).Err()
+}
