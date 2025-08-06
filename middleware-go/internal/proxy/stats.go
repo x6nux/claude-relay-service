@@ -5,7 +5,6 @@ import (
 	"html/template"
 	"net/http"
 	"sort"
-	"strings"
 	"time"
 
 	"claude-middleware/internal/redis"
@@ -68,23 +67,22 @@ func NewStatsHandler(redisClient *redis.Client, service *Service) *StatsHandler 
 	}
 }
 
-// sanitizeAccountID 对账户ID进行脱敏处理，保留前3位和后3位，中间用*代替
+// sanitizeAccountID 对账户ID进行脱敏处理，只保留前3位和后3位
 func sanitizeAccountID(accountID string) string {
 	if len(accountID) <= 3 {
-		// 如果ID太短，完全用*代替
-		return strings.Repeat("*", len(accountID))
+		// 如果ID太短，直接返回
+		return accountID
 	}
 
 	if len(accountID) <= 6 {
-		// 短ID，保留前2位，其余用*代替
-		return accountID[:2] + strings.Repeat("*", len(accountID)-2)
+		// 短ID，保留前3位
+		return accountID[:3]
 	}
 
-	// 标准脱敏：保留前3位和后3位，中间用*代替
+	// 标准脱敏：只显示前3位和后3位
 	prefix := accountID[:3]
 	suffix := accountID[len(accountID)-3:]
-	middle := strings.Repeat("*", len(accountID)-6)
-	return prefix + middle + suffix
+	return prefix + suffix
 }
 
 // GetStatistics handles GET /stats requests
