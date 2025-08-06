@@ -119,6 +119,7 @@ func (h *StatsHandler) GetStatistics(c *gin.Context) {
 			// 如果没有统计数据，创建默认指标
 			metrics = &redis.AccountMetrics{
 				AccountID:    account.ID,
+				AccountName:  account.Name,
 				RequestCount: 0,
 				ErrorCount:   0,
 				ErrorRate:    0.0,

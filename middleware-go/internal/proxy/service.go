@@ -127,18 +127,31 @@ func (s *Service) ProxyHandler(c *gin.Context) {
 		// 尝试发送请求
 		success := s.attemptRequest(c, accountID, bodyBytes, requestPath, retryCount, maxRetries)
 		if success {
-			// 记录成功的请求
+			// 记录成功的请求（同时使用ID和名称记录）
 			if err := s.redisClient.IncrementRequestCount(accountID); err != nil {
-				fmt.Printf("[DEBUG] Failed to record request count for account %s: %v\n", accountID, err)
+				fmt.Printf("[DEBUG] Failed to record request count by ID for account %s: %v\n", accountID, err)
+			}
+			if selectedAccount != nil {
+				if err := s.redisClient.IncrementRequestCountByName(selectedAccount.Name); err != nil {
+					fmt.Printf("[DEBUG] Failed to record request count by name for account %s: %v\n", selectedAccount.Name, err)
+				}
 			}
 			return // 请求成功，结束重试
 		} else {
 			// 记录失败的请求（既增加请求数也增加错误数）
 			if err := s.redisClient.IncrementRequestCount(accountID); err != nil {
-				fmt.Printf("[DEBUG] Failed to record request count for account %s: %v\n", accountID, err)
+				fmt.Printf("[DEBUG] Failed to record request count by ID for account %s: %v\n", accountID, err)
 			}
 			if err := s.redisClient.IncrementErrorCount(accountID); err != nil {
-				fmt.Printf("[DEBUG] Failed to record error count for account %s: %v\n", accountID, err)
+				fmt.Printf("[DEBUG] Failed to record error count by ID for account %s: %v\n", accountID, err)
+			}
+			if selectedAccount != nil {
+				if err := s.redisClient.IncrementRequestCountByName(selectedAccount.Name); err != nil {
+					fmt.Printf("[DEBUG] Failed to record request count by name for account %s: %v\n", selectedAccount.Name, err)
+				}
+				if err := s.redisClient.IncrementErrorCountByName(selectedAccount.Name); err != nil {
+					fmt.Printf("[DEBUG] Failed to record error count by name for account %s: %v\n", selectedAccount.Name, err)
+				}
 			}
 		}
 	}
@@ -381,22 +394,42 @@ func (s *Service) selectBestAccount(accounts []redis.ClaudeAccount) (string, err
 		return accounts[0].ID, nil
 	}
 	
-	// 获取所有账户的统计指标
-	allMetrics, err := s.redisClient.GetAllAccountMetrics()
-	if err != nil {
-		fmt.Printf("[DEBUG] Failed to get account metrics, using random selection: %v\n", err)
-		return "", err
+	// 首先尝试获取基于名称的统计指标
+	nameBasedMetrics, nameErr := s.redisClient.GetAllAccountMetricsByName()
+	
+	// 如果名称统计不可用，回退到ID统计
+	var allMetrics map[string]*redis.AccountMetrics
+	if nameErr != nil {
+		fmt.Printf("[DEBUG] Name-based metrics not available, falling back to ID-based: %v\n", nameErr)
+		idBasedMetrics, idErr := s.redisClient.GetAllAccountMetrics()
+		if idErr != nil {
+			fmt.Printf("[DEBUG] Failed to get account metrics, using random selection: %v\n", idErr)
+			return "", idErr
+		}
+		allMetrics = idBasedMetrics
+	} else {
+		allMetrics = nameBasedMetrics
 	}
 	
 	var accountScores []AccountScore
 	
 	// 为每个账户计算评分
 	for _, account := range accounts {
-		metrics, exists := allMetrics[account.ID]
+		var metrics *redis.AccountMetrics
+		var exists bool
+		
+		// 如果使用名称统计，按名称查找；否则按ID查找
+		if nameErr == nil {
+			metrics, exists = allMetrics[account.Name]
+		} else {
+			metrics, exists = allMetrics[account.ID]
+		}
+		
 		if !exists {
 			// 新账户，创建默认指标
 			metrics = &redis.AccountMetrics{
 				AccountID:    account.ID,
+				AccountName:  account.Name,
 				RequestCount: 0,
 				ErrorCount:   0,
 				ErrorRate:    0.0,
