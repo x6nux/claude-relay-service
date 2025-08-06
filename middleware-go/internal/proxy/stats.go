@@ -402,11 +402,11 @@ func (h *StatsHandler) GetStatsPage(c *gin.Context) {
 			display.ErrorRateClass = "high"
 		}
 		
-		// 格式化时间 - 使用上海时区
+		// 格式化时间 - 使用 UTC+8 时区
 		if metrics.LastUpdated > 0 {
 			// LastUpdated 是秒级时间戳，直接使用
-			shanghaiLoc, _ := time.LoadLocation("Asia/Shanghai")
-			display.LastUpdatedFormatted = time.Unix(metrics.LastUpdated, 0).In(shanghaiLoc).Format("01-02 15:04:05")
+			utc8 := time.FixedZone("UTC+8", 8*60*60)
+			display.LastUpdatedFormatted = time.Unix(metrics.LastUpdated, 0).In(utc8).Format("01-02 15:04:05")
 		} else {
 			display.LastUpdatedFormatted = "未更新"
 		}
@@ -431,9 +431,9 @@ func (h *StatsHandler) GetStatsPage(c *gin.Context) {
 	}
 	
 	// 准备页面数据
-	shanghaiLoc, _ := time.LoadLocation("Asia/Shanghai")
+	utc8 := time.FixedZone("UTC+8", 8*60*60)
 	pageData := StatsPageData{
-		UpdateTime:       time.Now().In(shanghaiLoc).Format("2006-01-02 15:04:05"),
+		UpdateTime:       time.Now().In(utc8).Format("2006-01-02 15:04:05"),
 		TotalAccounts:    len(accounts),
 		ActiveAccounts:   accountStats.Active,
 		AccountStats:     accountStats,
