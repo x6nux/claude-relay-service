@@ -404,9 +404,9 @@ func (h *StatsHandler) GetStatsPage(c *gin.Context) {
 		
 		// 格式化时间 - 使用上海时区
 		if metrics.LastUpdated > 0 {
-			// LastUpdated 是毫秒时间戳，转换为秒
+			// LastUpdated 是秒级时间戳，直接使用
 			shanghaiLoc, _ := time.LoadLocation("Asia/Shanghai")
-			display.LastUpdatedFormatted = time.Unix(metrics.LastUpdated/1000, 0).In(shanghaiLoc).Format("01-02 15:04:05")
+			display.LastUpdatedFormatted = time.Unix(metrics.LastUpdated, 0).In(shanghaiLoc).Format("01-02 15:04:05")
 		} else {
 			display.LastUpdatedFormatted = "未更新"
 		}
