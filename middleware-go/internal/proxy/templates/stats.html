@@ -33,16 +33,19 @@
         }
         
         .header {
-            background: rgba(255, 255, 255, 0.15);
+            background: linear-gradient(145deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 252, 0.95) 100%);
             backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 25px;
+            border: 1px solid rgba(226, 232, 240, 0.6);
+            border-radius: 20px;
             padding: 25px 35px;
             margin-bottom: 35px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            box-shadow: 
+                0 10px 25px rgba(0, 0, 0, 0.1),
+                0 4px 8px rgba(0, 0, 0, 0.03),
+                inset 0 1px 0 rgba(255, 255, 255, 0.8);
             transition: all 0.3s ease;
             position: relative;
             overflow: hidden;
@@ -115,35 +118,32 @@
         }
         
         .stat-card {
-            background: white;
-            border-radius: 25px;
+            background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+            border-radius: 20px;
             padding: 35px;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.08);
-            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 
+                0 10px 30px rgba(0, 0, 0, 0.12),
+                0 4px 8px rgba(0, 0, 0, 0.05),
+                inset 0 1px 0 rgba(255, 255, 255, 0.9);
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
             position: relative;
             overflow: hidden;
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(226, 232, 240, 0.8);
         }
         
-        .stat-card::after {
+        .stat-card::before {
             content: '';
             position: absolute;
-            top: -50%;
-            right: -50%;
-            width: 200%;
-            height: 200%;
-            background: conic-gradient(from 0deg, transparent, rgba(102, 126, 234, 0.1), transparent);
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, transparent, rgba(102, 126, 234, 0.6), transparent);
             opacity: 0;
-            transition: all 0.5s ease;
-            animation: rotate 10s linear infinite;
+            transition: opacity 0.3s ease;
         }
         
-        @keyframes rotate {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
-        
-        .stat-card:hover::after {
+        .stat-card:hover::before {
             opacity: 1;
         }
         
@@ -160,8 +160,11 @@
         }
         
         .stat-card:hover {
-            transform: translateY(-12px) scale(1.03);
-            box-shadow: 0 35px 70px rgba(0, 0, 0, 0.2);
+            transform: translateY(-8px);
+            box-shadow: 
+                0 25px 50px rgba(0, 0, 0, 0.18),
+                0 8px 16px rgba(0, 0, 0, 0.08),
+                inset 0 1px 0 rgba(255, 255, 255, 0.95);
         }
         
         .stat-card:hover::before {
@@ -169,25 +172,26 @@
         }
         
         .stat-card .label {
-            color: #6b7280;
-            font-size: 13px;
+            color: #64748b;
+            font-size: 14px;
             text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 15px;
-            font-weight: 600;
+            letter-spacing: 1.2px;
+            margin-bottom: 18px;
+            font-weight: 700;
+            position: relative;
         }
         
         .stat-card .value {
-            font-size: 42px;
+            font-size: 48px;
             font-weight: 900;
-            color: #1f2937;
-            margin-bottom: 10px;
-            background: linear-gradient(135deg, #667eea, #764ba2);
+            margin-bottom: 12px;
+            background: linear-gradient(135deg, #1f2937 0%, #4b5563 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
             position: relative;
             z-index: 10;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
             animation: numberCount 1s ease-out;
         }
         
@@ -203,23 +207,36 @@
         }
         
         .stat-card .meta {
-            color: #9ca3af;
-            font-size: 12px;
+            color: #64748b;
+            font-size: 13px;
+            font-weight: 500;
         }
         
         .stat-card.blue {
-            background: linear-gradient(135deg, rgba(59, 130, 246, 0.05), rgba(147, 197, 253, 0.05));
-            border-left: 5px solid #3b82f6;
+            background: linear-gradient(145deg, #dbeafe 0%, #bfdbfe 100%);
+            border-color: rgba(59, 130, 246, 0.3);
+        }
+        
+        .stat-card.blue::before {
+            background: linear-gradient(90deg, transparent, #3b82f6, transparent);
         }
         
         .stat-card.red {
-            background: linear-gradient(135deg, rgba(239, 68, 68, 0.05), rgba(252, 165, 165, 0.05));
-            border-left: 5px solid #ef4444;
+            background: linear-gradient(145deg, #fee2e2 0%, #fecaca 100%);
+            border-color: rgba(239, 68, 68, 0.3);
+        }
+        
+        .stat-card.red::before {
+            background: linear-gradient(90deg, transparent, #ef4444, transparent);
         }
         
         .stat-card.green {
-            background: linear-gradient(135deg, rgba(16, 185, 129, 0.05), rgba(167, 243, 208, 0.05));
-            border-left: 5px solid #10b981;
+            background: linear-gradient(145deg, #d1fae5 0%, #a7f3d0 100%);
+            border-color: rgba(16, 185, 129, 0.3);
+        }
+        
+        .stat-card.green::before {
+            background: linear-gradient(90deg, transparent, #10b981, transparent);
         }
         
         .account-details {
@@ -245,14 +262,16 @@
         }
         
         .table-container {
-            background: white;
-            border-radius: 30px;
+            background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+            border-radius: 20px;
             padding: 35px;
-            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.08);
+            box-shadow: 
+                0 10px 30px rgba(0, 0, 0, 0.12),
+                0 4px 8px rgba(0, 0, 0, 0.05),
+                inset 0 1px 0 rgba(255, 255, 255, 0.9);
             overflow-x: auto;
             position: relative;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(226, 232, 240, 0.8);
             animation: slideInFromBottom 0.8s ease-out 0.3s both;
         }
         
@@ -273,9 +292,9 @@
             top: 0;
             left: 0;
             right: 0;
-            height: 6px;
-            background: linear-gradient(90deg, #667eea, #764ba2, #667eea);
-            border-radius: 30px 30px 0 0;
+            height: 4px;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 50%, #667eea 100%);
+            border-radius: 20px 20px 0 0;
             background-size: 200% 100%;
             animation: gradientMove 3s ease-in-out infinite;
         }
