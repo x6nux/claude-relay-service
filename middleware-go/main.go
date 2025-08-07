@@ -76,6 +76,18 @@ func main() {
 	// 初始化统计服务处理器
 	statsHandler := proxy.NewStatsHandler(redisClient, proxyService)
 
+	// 初始化账号同步管理器（定时获取账号并初始化统计）
+	syncInterval := 30 * time.Second // 默认30秒同步一次
+	if intervalStr := os.Getenv("ACCOUNT_SYNC_INTERVAL"); intervalStr != "" {
+		if parsed, err := time.ParseDuration(intervalStr); err == nil {
+			syncInterval = parsed
+		}
+	}
+	accountSyncManager := proxy.NewAccountSyncManager(redisClient, syncInterval)
+	accountSyncManager.Start()
+	defer accountSyncManager.Stop()
+	fmt.Printf("✅ Account sync manager started (interval: %v)\n", syncInterval)
+
 	// 初始化请求日志记录器
 	requestLogger := requestlog.NewRequestLogger(&cfg.RequestLog)
 
@@ -212,6 +224,10 @@ func main() {
 	<-quit
 
 	fmt.Println("🛑 Shutting down server...")
+
+	// 停止账号同步管理器
+	fmt.Println("Stopping account sync manager...")
+	accountSyncManager.Stop()
 
 	// 停止请求日志记录器
 	if cfg.RequestLog.Enabled {

@@ -116,14 +116,16 @@ func (h *StatsHandler) GetStatistics(c *gin.Context) {
 	for _, account := range accounts {
 		metrics, exists := allMetrics[account.ID]
 		if !exists {
-			// 如果没有统计数据，创建默认指标
+			// 如果没有统计数据，创建默认指标并初始化到Redis
 			metrics = &redis.AccountMetrics{
 				AccountID:    account.ID,
 				RequestCount: 0,
 				ErrorCount:   0,
 				ErrorRate:    0.0,
-				LastUpdated:  0,
+				LastUpdated:  time.Now().Unix(),
 			}
+			// 主动创建初始统计记录，确保新账号被纳入统计
+			h.redisClient.InitializeAccountMetrics(account.ID)
 		}
 
 		// 计算账户评分
@@ -331,11 +333,16 @@ func (h *StatsHandler) GetStatsPage(c *gin.Context) {
 		// 从allMetrics中查找当前账户的指标
 		metrics := allMetrics[account.ID]
 		if metrics == nil {
+			// 如果没有统计数据，创建默认指标并初始化到Redis
 			metrics = &redis.AccountMetrics{
+				AccountID:    account.ID,
 				RequestCount: 0,
 				ErrorCount:   0,
 				ErrorRate:    0.0,
+				LastUpdated:  time.Now().Unix(),
 			}
+			// 主动创建初始统计记录，确保新账号被纳入统计
+			h.redisClient.InitializeAccountMetrics(account.ID)
 		}
 		
 		// 计算账户评分

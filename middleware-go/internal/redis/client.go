@@ -234,6 +234,38 @@ func (c *Client) IncrementErrorCount(accountID string) error {
 	return err
 }
 
+// InitializeAccountMetrics 初始化账户的统计指标（用于新账号）
+func (c *Client) InitializeAccountMetrics(accountID string) error {
+	key := fmt.Sprintf("middleware:metrics:%s", accountID)
+	now := time.Now().Unix()
+	
+	// 检查是否已存在
+	exists, err := c.client.Exists(c.ctx, key).Result()
+	if err != nil {
+		return fmt.Errorf("failed to check metrics existence: %w", err)
+	}
+	
+	// 如果已存在，不覆盖
+	if exists > 0 {
+		return nil
+	}
+	
+	// 创建初始统计记录
+	pipe := c.client.Pipeline()
+	pipe.HSet(c.ctx, key, "requestCount", 0)
+	pipe.HSet(c.ctx, key, "errorCount", 0)
+	pipe.HSet(c.ctx, key, "lastUpdated", now)
+	pipe.Expire(c.ctx, key, 7*24*time.Hour) // 7天过期
+	
+	_, err = pipe.Exec(c.ctx)
+	if err != nil {
+		return fmt.Errorf("failed to initialize account metrics: %w", err)
+	}
+	
+	fmt.Printf("[INFO] ✅ Initialized metrics for new account: %s\n", accountID)
+	return nil
+}
+
 // GetAllAccountMetrics 获取所有账户的统计指标
 func (c *Client) GetAllAccountMetrics() (map[string]*AccountMetrics, error) {
 	pattern := "middleware:metrics:*"
