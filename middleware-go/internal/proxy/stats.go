@@ -129,7 +129,7 @@ func (h *StatsHandler) GetStatistics(c *gin.Context) {
 		}
 
 		// 计算账户评分
-		score := h.service.calculateAccountScore(metrics)
+		score := h.service.calculateAccountScore(metrics, false)
 
 		// 记录最高分账户
 		if score > bestScore {
@@ -224,7 +224,7 @@ func (h *StatsHandler) GetAccountStatistics(c *gin.Context) {
 	}
 
 	// 计算账户评分
-	score := h.service.calculateAccountScore(metrics)
+	score := h.service.calculateAccountScore(metrics, false)
 
 	accountStat := AccountStatistics{
 		AccountID:    sanitizeAccountID(targetAccount.ID),
@@ -346,7 +346,7 @@ func (h *StatsHandler) GetStatsPage(c *gin.Context) {
 		}
 		
 		// 计算账户评分
-		score := h.service.calculateAccountScore(metrics)
+		score := h.service.calculateAccountScore(metrics, false)
 		
 		// 更新总计数
 		totalRequests += metrics.RequestCount

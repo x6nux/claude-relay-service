@@ -404,7 +404,7 @@ func (s *Service) selectBestAccount(accounts []redis.ClaudeAccount, isOpusModel 
 			}
 		}
 		
-		score := s.calculateAccountScore(metrics, account.IsMAX, isOpusModel)
+		score := s.calculateAccountScore(metrics, account.IsMAX && !isOpusModel)
 		accountScores = append(accountScores, AccountScore{
 			Account: account,
 			Score:   score,
@@ -436,7 +436,7 @@ func (s *Service) selectBestAccount(accounts []redis.ClaudeAccount, isOpusModel 
 }
 
 // calculateAccountScore 计算账户的综合评分
-func (s *Service) calculateAccountScore(metrics *redis.AccountMetrics, isMAX bool, isOpusModel bool) float64 {
+func (s *Service) calculateAccountScore(metrics *redis.AccountMetrics, applyMAXPenalty bool) float64 {
 	// 基础分数
 	baseScore := 100.0
 	
@@ -472,7 +472,7 @@ func (s *Service) calculateAccountScore(metrics *redis.AccountMetrics, isMAX boo
 	
 	// 对于非opus模型使用MAX账号的惩罚
 	// 降低30分以确保优先使用PRO账号
-	if isMAX && !isOpusModel {
+	if applyMAXPenalty {
 		finalScore -= 30.0
 		if finalScore < 0 {
 			finalScore = 0
