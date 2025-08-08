@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"claude-middleware/internal/config"
@@ -121,9 +122,9 @@ func (c *Client) parseAccountData(data map[string]string) (ClaudeAccount, error)
 		account.IsMAX = isMAX == "true"
 	} else {
 		// 如果 Redis 中没有 isMAX 字段，基于账号名称自动判断
-		// 账号名称以 "MAX" 开头的视为 MAX 账号
-		if account.Name != "" && len(account.Name) >= 3 {
-			account.IsMAX = account.Name[:3] == "MAX"
+		// 账号名称包含 "MAX"（不区分大小写）的视为 MAX 账号
+		if account.Name != "" {
+			account.IsMAX = strings.Contains(strings.ToUpper(account.Name), "MAX")
 		}
 	}
 	

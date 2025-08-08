@@ -11,7 +11,7 @@ middleware-go 现在支持基于模型类型的智能账号选择，特别是为
 支持两种方式识别 MAX 账号：
 
 1. **Redis 字段识别**：从 Redis 中的 `isMAX` 字段读取
-2. **名称规则识别**：账号名称以 "MAX" 开头的自动识别为 MAX 账号
+2. **名称规则识别**：账号名称包含 "MAX"（不区分大小写）的自动识别为 MAX 账号
 
 ```go
 // Redis 中的账号数据示例
@@ -26,7 +26,7 @@ middleware-go 现在支持基于模型类型的智能账号选择，特别是为
 // 或者仅通过名称识别
 {
   "id": "account-456", 
-  "name": "MAX-Premium-Account",  // 以 MAX 开头，自动识别为 MAX 账号
+  "name": "Premium-MAX-Account",  // 包含 MAX（不区分大小写），自动识别为 MAX 账号
   "isActive": "true",
   "status": "active"
 }
@@ -86,18 +86,19 @@ middleware-go 现在支持基于模型类型的智能账号选择，特别是为
 # 方法 1：设置 isMAX 字段
 redis-cli HSET claude:account:123 isMAX true
 
-# 方法 2：确保账号名称以 MAX 开头
-redis-cli HSET claude:account:456 name "MAX-Premium-Account"
+# 方法 2：确保账号名称包含 MAX（不区分大小写）
+redis-cli HSET claude:account:456 name "Premium-MAX-Account"
 ```
 
 ### 账号命名规范
 
-建议的 MAX 账号命名：
+建议的 MAX 账号命名（包含"MAX"，不区分大小写）：
 - `MAX-Account-1`
-- `MAX-Premium-001` 
-- `MAX-Opus-Primary`
+- `Premium-MAX-001` 
+- `Account-max-Primary`
+- `super-Max-Account`
 
-普通账号命名：
+普通账号命名（不包含"MAX"）：
 - `Regular-Account-1`
 - `Standard-001`
 - `Basic-Account`
