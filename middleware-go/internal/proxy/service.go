@@ -314,10 +314,11 @@ func (s *Service) selectAvailableAccountWithExclusions(excludeAccountIDs map[str
 			}
 		}
 	} else {
-		// 对于其他模型，使用所有类型的账号（优先非 MAX 账号以节省资源）
+		// 对于其他模型，使用所有类型的账号
+		// 通过评分系统自动优先使用PRO账号（MAX账号会被降低30分）
 		if len(availableAccounts) > 0 {
 			selectedAccounts = availableAccounts
-			fmt.Println("[DEBUG] 🎯 Using all available accounts for regular model")
+			fmt.Println("[DEBUG] 🎯 Using all available accounts for regular model (PRO accounts preferred)")
 		} else if len(rateLimitedAccounts) > 0 {
 			selectedAccounts = rateLimitedAccounts
 			fmt.Println("[WARN] ⚠️ Using rate-limited accounts (no available accounts)")
@@ -333,7 +334,7 @@ func (s *Service) selectAvailableAccountWithExclusions(excludeAccountIDs map[str
 	}
 	
 	// 使用智能选择算法替代随机选择
-	selectedAccountID, err := s.selectBestAccount(selectedAccounts)
+	selectedAccountID, err := s.selectBestAccount(selectedAccounts, requiresMAX)
 	if err != nil {
 		fmt.Printf("[WARN] Intelligent selection failed, falling back to random: %v\n", err)
 		// 如果智能选择失败，回退到随机选择
@@ -372,7 +373,7 @@ type AccountScore struct {
 }
 
 // selectBestAccount 使用加权评分算法选择最佳账户
-func (s *Service) selectBestAccount(accounts []redis.ClaudeAccount) (string, error) {
+func (s *Service) selectBestAccount(accounts []redis.ClaudeAccount, isOpusModel bool) (string, error) {
 	if len(accounts) == 0 {
 		return "", fmt.Errorf("no accounts provided")
 	}
@@ -403,7 +404,7 @@ func (s *Service) selectBestAccount(accounts []redis.ClaudeAccount) (string, err
 			}
 		}
 		
-		score := s.calculateAccountScore(metrics)
+		score := s.calculateAccountScore(metrics, account.IsMAX, isOpusModel)
 		accountScores = append(accountScores, AccountScore{
 			Account: account,
 			Score:   score,
@@ -419,8 +420,12 @@ func (s *Service) selectBestAccount(accounts []redis.ClaudeAccount) (string, err
 	// 记录选择过程的详细信息
 	fmt.Printf("[DEBUG] 🧮 Account scoring results:\n")
 	for i, as := range accountScores {
-		fmt.Printf("[DEBUG]   %d. %s (Score: %.3f, Requests: %d, Errors: %d, ErrorRate: %.3f%%)\n", 
-			i+1, as.Account.ID, as.Score, as.Metrics.RequestCount, as.Metrics.ErrorCount, as.Metrics.ErrorRate*100)
+		accountType := "PRO"
+		if as.Account.IsMAX {
+			accountType = "MAX"
+		}
+		fmt.Printf("[DEBUG]   %d. %s (%s, Score: %.3f, Requests: %d, Errors: %d, ErrorRate: %.3f%%)\n", 
+			i+1, as.Account.ID, accountType, as.Score, as.Metrics.RequestCount, as.Metrics.ErrorCount, as.Metrics.ErrorRate*100)
 	}
 	
 	// 使用加权随机选择，分数越高被选中的概率越大
@@ -431,7 +436,7 @@ func (s *Service) selectBestAccount(accounts []redis.ClaudeAccount) (string, err
 }
 
 // calculateAccountScore 计算账户的综合评分
-func (s *Service) calculateAccountScore(metrics *redis.AccountMetrics) float64 {
+func (s *Service) calculateAccountScore(metrics *redis.AccountMetrics, isMAX bool, isOpusModel bool) float64 {
 	// 基础分数
 	baseScore := 100.0
 	
@@ -463,6 +468,15 @@ func (s *Service) calculateAccountScore(metrics *redis.AccountMetrics) float64 {
 	// 为新账户（无历史记录）给予适度的优势，避免它们永远不被选择
 	if metrics.RequestCount == 0 {
 		finalScore += 10.0 // 新账户奖励分数
+	}
+	
+	// 对于非opus模型使用MAX账号的惩罚
+	// 降低30分以确保优先使用PRO账号
+	if isMAX && !isOpusModel {
+		finalScore -= 30.0
+		if finalScore < 0 {
+			finalScore = 0
+		}
 	}
 	
 	return finalScore
