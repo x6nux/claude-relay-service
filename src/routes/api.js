@@ -747,7 +747,9 @@ router.get('/v1/accounts/export', authenticateApiKey, async (req, res) => {
     const shouldIncludeTokens = includeTokens === 'true';
     
     // 获取所有Claude账户
-    const claudeAccounts = await claudeAccountService.getAllAccounts();
+    const claudeAccounts = shouldIncludeTokens 
+      ? await redis.getAllClaudeAccounts()  // 获取原始数据包含token
+      : await claudeAccountService.getAllAccounts();
     
     // 获取所有Gemini账户  
     const geminiAccounts = await geminiAccountService.getAllAccounts();
@@ -756,34 +758,49 @@ router.get('/v1/accounts/export', authenticateApiKey, async (req, res) => {
     const apiKeys = await apiKeyService.getAllApiKeys();
     
     // 处理Claude账户数据
-    const exportClaudeAccounts = claudeAccounts.map(account => {
+    const exportClaudeAccounts = await Promise.all(claudeAccounts.map(async account => {
       const baseData = {
         id: account.id,
         name: account.name,
         description: account.description || '',
         email: account.email || '',
         accountType: account.accountType || 'shared',
-        isActive: account.isActive,
+        isActive: shouldIncludeTokens ? (account.isActive === 'true') : account.isActive,
         status: account.status,
         createdAt: account.createdAt,
         updatedAt: account.updatedAt,
-        proxy: account.proxy || null,
-        rateLimitStatus: account.rateLimitStatus || null
+        proxy: account.proxy ? JSON.parse(account.proxy) : null
       };
       
       if (shouldIncludeTokens) {
-        // 包含完整的token信息
-        baseData.claudeAiOauth = account.claudeAiOauth || null;
-        baseData.refreshToken = account.refreshToken || '';
-        baseData.password = account.password || '';
+        // 当使用原始数据时，需要处理限流状态和解密数据
+        const rateLimitInfo = await claudeAccountService.getAccountRateLimitInfo(account.id);
+        baseData.rateLimitStatus = rateLimitInfo ? {
+          isRateLimited: rateLimitInfo.isRateLimited,
+          rateLimitedAt: rateLimitInfo.rateLimitedAt,
+          minutesRemaining: rateLimitInfo.minutesRemaining
+        } : null;
+        
+        // 解密并包含完整的token信息
+        try {
+          baseData.claudeAiOauth = account.claudeAiOauth ? JSON.parse(claudeAccountService.decryptSensitiveData(account.claudeAiOauth)) : null;
+          baseData.refreshToken = account.refreshToken ? claudeAccountService.decryptSensitiveData(account.refreshToken) : '';
+          baseData.password = account.password ? claudeAccountService.decryptSensitiveData(account.password) : '';
+        } catch (error) {
+          // 如果解密失败，设置为null/空字符串
+          baseData.claudeAiOauth = null;
+          baseData.refreshToken = '';
+          baseData.password = '';
+        }
       } else {
+        baseData.rateLimitStatus = account.rateLimitStatus || null;
         // 不包含敏感信息，只显示是否有token
         baseData.hasOAuthToken = !!(account.claudeAiOauth && account.claudeAiOauth.accessToken);
         baseData.hasRefreshToken = !!(account.claudeAiOauth && account.claudeAiOauth.refreshToken);
       }
       
       return baseData;
-    });
+    }));
     
     // 处理Gemini账户数据
     const exportGeminiAccounts = geminiAccounts.map(account => {

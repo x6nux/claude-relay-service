@@ -998,6 +998,11 @@ class ClaudeAccountService {
       throw error;
     }
   }
+
+  // 🔓 公开的解密方法（用于外部调用）
+  decryptSensitiveData(encryptedData) {
+    return this._decryptSensitiveData(encryptedData);
+  }
 }
 
 module.exports = new ClaudeAccountService();
