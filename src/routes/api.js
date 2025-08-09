@@ -2,6 +2,7 @@ const express = require('express');
 const claudeRelayService = require('../services/claudeRelayService');
 const apiKeyService = require('../services/apiKeyService');
 const claudeAccountService = require('../services/claudeAccountService');
+const geminiAccountService = require('../services/geminiAccountService');
 const oauthHelper = require('../utils/oauthHelper');
 const { authenticateApiKey } = require('../middleware/auth');
 const logger = require('../utils/logger');
@@ -736,6 +737,137 @@ router.post('/v1/accounts/:accountId/refresh', authenticateApiKey, checkAccountM
       error: 'Failed to refresh token',
       message: error.message
     });
+  }
+});
+
+// 📋 导出所有账号配置（基于API Key认证）
+router.get('/v1/accounts/export', authenticateApiKey, async (req, res) => {
+  try {
+    const { includeTokens = 'false' } = req.query;
+    const shouldIncludeTokens = includeTokens === 'true';
+    
+    // 获取所有Claude账户
+    const claudeAccounts = await claudeAccountService.getAllAccounts();
+    
+    // 获取所有Gemini账户  
+    const geminiAccounts = await geminiAccountService.getAllAccounts();
+    
+    // 获取所有API Keys
+    const apiKeys = await apiKeyService.getAllApiKeys();
+    
+    // 处理Claude账户数据
+    const exportClaudeAccounts = claudeAccounts.map(account => {
+      const baseData = {
+        id: account.id,
+        name: account.name,
+        description: account.description || '',
+        email: account.email || '',
+        accountType: account.accountType || 'shared',
+        isActive: account.isActive,
+        status: account.status,
+        createdAt: account.createdAt,
+        updatedAt: account.updatedAt,
+        proxy: account.proxy || null,
+        rateLimitStatus: account.rateLimitStatus || null
+      };
+      
+      if (shouldIncludeTokens) {
+        // 包含完整的token信息
+        baseData.claudeAiOauth = account.claudeAiOauth || null;
+        baseData.refreshToken = account.refreshToken || '';
+        baseData.password = account.password || '';
+      } else {
+        // 不包含敏感信息，只显示是否有token
+        baseData.hasOAuthToken = !!(account.claudeAiOauth && account.claudeAiOauth.accessToken);
+        baseData.hasRefreshToken = !!(account.claudeAiOauth && account.claudeAiOauth.refreshToken);
+      }
+      
+      return baseData;
+    });
+    
+    // 处理Gemini账户数据
+    const exportGeminiAccounts = geminiAccounts.map(account => {
+      const baseData = {
+        id: account.id,
+        name: account.name,
+        description: account.description || '',
+        accountType: account.accountType || 'shared',
+        isActive: account.isActive,
+        status: account.status,
+        createdAt: account.createdAt,
+        updatedAt: account.updatedAt
+      };
+      
+      if (shouldIncludeTokens) {
+        // 包含完整的token信息
+        baseData.accessToken = account.accessToken || '';
+        baseData.refreshToken = account.refreshToken || '';
+      } else {
+        // 不包含敏感信息，只显示是否有token
+        baseData.hasAccessToken = !!(account.accessToken);
+        baseData.hasRefreshToken = !!(account.refreshToken);
+      }
+      
+      return baseData;
+    });
+    
+    // 处理API Key数据
+    const exportApiKeys = apiKeys.map(key => {
+      const baseData = {
+        id: key.id,
+        name: key.name,
+        description: key.description || '',
+        tokenLimit: key.tokenLimit,
+        isActive: key.isActive,
+        createdAt: key.createdAt,
+        updatedAt: key.updatedAt,
+        expiresAt: key.expiresAt,
+        claudeAccountId: key.claudeAccountId || '',
+        geminiAccountId: key.geminiAccountId || '',
+        permissions: key.permissions || 'all',
+        concurrencyLimit: key.concurrencyLimit,
+        rateLimitWindow: key.rateLimitWindow,
+        rateLimitRequests: key.rateLimitRequests,
+        enableModelRestriction: key.enableModelRestriction || false,
+        restrictedModels: key.restrictedModels || [],
+        enableClientRestriction: key.enableClientRestriction || false,
+        allowedClients: key.allowedClients || [],
+        dailyCostLimit: key.dailyCostLimit,
+        usage: key.usage || null
+      };
+      
+      if (shouldIncludeTokens) {
+        // 包含完整的API Key信息
+        baseData.apiKey = key.key || '';
+      } else {
+        // 不包含敏感信息，只显示是否有API Key
+        baseData.hasApiKey = !!key.key;
+      }
+      
+      return baseData;
+    });
+    
+    const exportData = {
+      metadata: {
+        exportedAt: new Date().toISOString(),
+        version: '1.0.0',
+        includeTokens: shouldIncludeTokens,
+        totalClaudeAccounts: exportClaudeAccounts.length,
+        totalGeminiAccounts: exportGeminiAccounts.length,
+        totalApiKeys: exportApiKeys.length,
+        requestedBy: req.apiKey.name
+      },
+      claudeAccounts: exportClaudeAccounts,
+      geminiAccounts: exportGeminiAccounts,
+      apiKeys: exportApiKeys
+    };
+    
+    logger.success(`📋 API Key exported all account configurations: ${exportClaudeAccounts.length} Claude accounts, ${exportGeminiAccounts.length} Gemini accounts, ${exportApiKeys.length} API keys (includeTokens: ${shouldIncludeTokens}) - Requested by: ${req.apiKey.name}`);
+    
+    res.json({ success: true, data: exportData });
+  } catch (error) {
+    logger.error('❌ Failed to export account configurations via API:', error);
+    res.status(500).json({ error: 'Failed to export account configurations', message: error.message });
   }
 });
 
